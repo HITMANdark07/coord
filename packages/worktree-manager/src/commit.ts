@@ -13,11 +13,30 @@ export async function hasChanges(cwd: string, env?: Record<string, string>): Pro
 
 export async function commitTurn(opts: {
   cwd: string;
+  /** The `agent/` branch this task owns; HEAD must still be on it. */
+  branch: string;
   message: string;
   trailers: string[];
   env?: Record<string, string>;
 }): Promise<{ committed: false } | { committed: true; sha: string }> {
   const { cwd, env } = opts;
+  // The agent can switch branches or detach HEAD; Coord only commits to its own agent/ branch.
+  let head = "";
+  try {
+    head = (await git(["symbolic-ref", "--short", "HEAD"], { cwd, env })).trim();
+  } catch (e) {
+    if (!(e instanceof GitError)) throw e;
+  }
+  if (!opts.branch.startsWith("agent/") || head !== opts.branch) {
+    throw new CommitError(
+      new GitError(
+        `HEAD is not on the task branch ${opts.branch} (HEAD: ${head || "detached"})`,
+        "commitTurn",
+        "",
+        -1,
+      ),
+    );
+  }
   await git(["add", "-A"], { cwd, env });
   if (!(await hasChanges(cwd, env))) return { committed: false };
   const body = opts.trailers.length

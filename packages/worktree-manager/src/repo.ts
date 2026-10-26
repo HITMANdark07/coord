@@ -1,4 +1,3 @@
-import { access } from "node:fs/promises";
 import { basename } from "node:path";
 import { RepoConfig } from "@coord/protocol";
 import { GitError, git } from "./git";
@@ -65,17 +64,4 @@ export async function readRepoConfig(repoPath: string, ref: string): Promise<Rep
     throw new ConfigError(`.coord/config.json is invalid: ${parsed.error.message}`);
   }
   return parsed.data;
-}
-
-export async function detectSetupCommands(worktreePath: string): Promise<string[]> {
-  const has = (f: string) =>
-    access(`${worktreePath}/${f}`).then(
-      () => true,
-      () => false,
-    );
-  if (await has("pnpm-lock.yaml")) return ["pnpm install --frozen-lockfile"];
-  if (await has("package-lock.json")) return ["npm ci"];
-  if (await has("yarn.lock")) return ["yarn install --frozen-lockfile"];
-  if ((await has("bun.lock")) || (await has("bun.lockb"))) return ["bun install"];
-  return [];
 }

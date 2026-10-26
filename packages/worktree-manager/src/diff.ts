@@ -1,4 +1,7 @@
 import type { DiffView } from "@coord/protocol";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { git } from "./git";
 
 const PATCH_CAP = 1_000_000;
@@ -15,14 +18,29 @@ const STATUS: Record<string, File["status"]> = {
 };
 
 export async function diffAgainstBase(opts: { cwd: string; baseRef: string }): Promise<DiffView> {
-  const { cwd, baseRef } = opts;
-  const base = (await git(["merge-base", baseRef, "HEAD"], { cwd })).trim();
-  // Intent-to-add makes new untracked files show up in the working-tree diff.
-  // Only the task worktree's index is touched, never the user's checkout.
-  await git(["add", "--intent-to-add", "-A"], { cwd });
+  // Intent-to-add makes new untracked files show up in the diff, but doing it in the real
+  // index would break the agent's `git stash` and make deleted files look like changes.
+  // So work on a private copy of the index.
+  const indexPath = resolve(
+    opts.cwd,
+    (await git(["rev-parse", "--git-path", "index"], { cwd: opts.cwd })).trim(),
+  );
+  const dir = await mkdtemp(join(tmpdir(), "coord-diff-"));
+  try {
+    const tmpIndex = join(dir, "index");
+    await copyFile(indexPath, tmpIndex);
+    return await diffWithIndex(opts.cwd, opts.baseRef, { GIT_INDEX_FILE: tmpIndex });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
-  const nameStatus = (await git(["diff", "--name-status", "-z", "-M", base], { cwd })).split("\0");
-  const numstat = (await git(["diff", "--numstat", "-z", "-M", base], { cwd })).split("\0");
+async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, string>): Promise<DiffView> {
+  const base = (await git(["merge-base", baseRef, "HEAD"], { cwd, env })).trim();
+  await git(["add", "--intent-to-add", "-A"], { cwd, env });
+
+  const nameStatus = (await git(["diff", "--name-status", "-z", "-M", base], { cwd, env })).split("\0");
+  const numstat = (await git(["diff", "--numstat", "-z", "-M", base], { cwd, env })).split("\0");
 
   const counts = new Map<string, { additions: number; deletions: number }>();
   for (let i = 0; i < numstat.length; i++) {
@@ -55,7 +73,7 @@ export async function diffAgainstBase(opts: { cwd: string; baseRef: string }): P
   let patch: string;
   let truncated = false;
   try {
-    patch = await git(["diff", "-M", base], { cwd, maxBuffer: PATCH_CAP + 1 });
+    patch = await git(["diff", "-M", base], { cwd, env, maxBuffer: PATCH_CAP + 1 });
   } catch (e) {
     const partial = (e as { stdout?: string }).stdout;
     if (partial === undefined || partial.length === 0) throw e;
