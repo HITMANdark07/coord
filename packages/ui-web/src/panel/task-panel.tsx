@@ -3,8 +3,10 @@ import { useAction, useClient, useTask } from "@coord/app-state";
 import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
 import { displayText, type Task } from "@coord/protocol";
 import { agentLabel } from "../format";
+import { useFocusWhileOpen } from "../use-focus-while-open";
 import { ChecksTab } from "./checks-tab";
 import { DiffTab } from "./diff-tab";
+import { InlineError } from "./inline-error";
 import { LiveTab } from "./live-tab";
 
 const c = colors.light;
@@ -13,6 +15,8 @@ const INTERRUPTIBLE = ["running", "needs_input"];
 const RESUMABLE = ["interrupted", "failed"];
 // Review, failed and interrupted tasks are discarded from the Checks tab instead.
 const CANCELLABLE = ["queued", "setting_up", "running", "needs_input"];
+// Inputs whose value is typed text; a checkbox or radio always has the value "on".
+const TEXT_INPUTS = ["text", "search", "url", "email", "password", "number"];
 
 /** Slides in from the right over the board, which stays visible (spec §4). */
 export function TaskPanel({
@@ -27,13 +31,19 @@ export function TaskPanel({
   const task = query && query.status !== "loading" ? query.data : undefined;
   const [tab, setTab] = useState<(typeof TABS)[number]>("Live");
   const panel = useRef<HTMLElement>(null);
+  // Here, not in the tabs, so switching tabs keeps half-written text (App keys the panel by task).
+  const [message, setMessage] = useState("");
+  const [feedback, setFeedback] = useState<string | null>(null); // null: the send-back box is closed
+  useFocusWhileOpen(panel);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.isComposing) return;
       // Esc in a field holding text would throw away a half-written follow-up or Deny reason.
       const t = e.target;
-      if ((t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) && t.value) return;
+      const typing =
+        t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && TEXT_INPUTS.includes(t.type));
+      if (typing && t.value) return;
       onClose();
     };
     document.addEventListener("keydown", onKey);
@@ -49,6 +59,7 @@ export function TaskPanel({
   return (
     <aside
       ref={panel}
+      tabIndex={-1}
       aria-label="Task"
       style={{
         position: "fixed",
@@ -101,11 +112,11 @@ export function TaskPanel({
             ))}
           </div>
           {tab === "Live" ? (
-            <LiveTab task={task} />
+            <LiveTab task={task} message={message} onMessage={setMessage} />
           ) : tab === "Diff" ? (
             <DiffTab task={task} />
           ) : (
-            <ChecksTab task={task} />
+            <ChecksTab task={task} feedback={feedback} onFeedback={setFeedback} />
           )}
         </>
       ) : (
@@ -146,13 +157,13 @@ function Header({ task }: { task: Task }) {
             Interrupt
           </button>
         )}
-        <ActionError error={interrupt.error} />
+        <InlineError error={interrupt.error} />
         {RESUMABLE.includes(task.status) && (
           <button disabled={resume.pending} onClick={() => void resume.run(task.id)}>
             Resume
           </button>
         )}
-        <ActionError error={resume.error} />
+        <InlineError error={resume.error} />
         {CANCELLABLE.includes(task.status) &&
           (confirming ? (
             <span>
@@ -168,15 +179,8 @@ function Header({ task }: { task: Task }) {
           ) : (
             <button onClick={() => setConfirming(true)}>Cancel</button>
           ))}
-        <ActionError error={cancel.error} />
+        <InlineError error={cancel.error} />
       </div>
     </header>
   );
 }
-
-const ActionError = ({ error }: { error: string | null }) =>
-  error && (
-    <span role="alert" style={{ color: statusColors.failed, fontSize: fontSize.sm }}>
-      {displayText(error)}
-    </span>
-  );

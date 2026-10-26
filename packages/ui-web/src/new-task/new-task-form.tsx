@@ -1,7 +1,9 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useAction, useAgents, useClient, useRepoConfig, useRepos } from "@coord/app-state";
 import { colors, fontSize, radius, space } from "@coord/design-tokens";
 import { branchSuggestion, CreateTaskInput, displayText, type PermissionMode } from "@coord/protocol";
+import { BYPASS_WARNING } from "../repos/repo-settings";
+import { useFocusWhileOpen } from "../use-focus-while-open";
 
 const c = colors.light;
 // The only agents the form offers (controller ruling); each is disabled when /agents says it's missing.
@@ -9,8 +11,6 @@ const AGENTS = [
   { id: "claude-code", label: "Claude Code" },
   { id: "codex", label: "Codex" },
 ] as const;
-const BYPASS_WARNING =
-  "Bypass runs every tool call without asking. Only use it for repos you'd let the agent change freely.";
 
 const field: CSSProperties = { display: "block", marginBottom: space.md };
 const wide: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box" };
@@ -28,7 +28,7 @@ export function NewTaskForm({
 }) {
   const client = useClient();
   const repos = useRepos();
-  const list = repos.status === "ok" ? repos.data : [];
+  const list = repos.status === "loading" ? [] : (repos.data ?? []);
   const [chosenRepo, setChosenRepo] = useState(repoId);
   const repo = list.find((r) => r.id === chosenRepo) ?? list.find((r) => r.id === repoId) ?? list[0];
   const config = useRepoConfig(repo?.id ?? null);
@@ -36,6 +36,8 @@ export function NewTaskForm({
   const agents = useAgents();
 
   const [prompt, setPrompt] = useState("");
+  const promptField = useRef<HTMLTextAreaElement>(null);
+  useFocusWhileOpen(promptField);
   const [agent, setAgent] = useState<(typeof AGENTS)[number]["id"]>("claude-code");
   const [model, setModel] = useState("");
   const [branchEdit, setBranchEdit] = useState<string | null>(null);
@@ -133,7 +135,13 @@ export function NewTaskForm({
       {config?.status === "error" && <p role="alert">{displayText(config.error)}</p>}
       <label style={field}>
         What should the agent do?
-        <textarea style={wide} rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+        <textarea
+          ref={promptField}
+          style={wide}
+          rows={4}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
       </label>
       <fieldset style={{ ...field, border: 0, padding: 0 }}>
         <legend>Agent</legend>

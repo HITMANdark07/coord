@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -10,9 +11,14 @@ afterEach(cleanup);
 
 function setup(status: string) {
   const transport = fakeTransport(() => ({}));
+  // TaskPanel holds the draft in the app.
+  function Harness() {
+    const [feedback, setFeedback] = useState<string | null>(null);
+    return <ChecksTab task={{ id: "t", status } as Task} feedback={feedback} onFeedback={setFeedback} />;
+  }
   render(
     <ClientProvider client={createClient(transport)}>
-      <ChecksTab task={{ id: "t", status } as Task} />
+      <Harness />
     </ClientProvider>,
   );
   return () => transport.requests.filter((r) => r.method === "POST");

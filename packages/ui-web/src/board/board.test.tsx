@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -75,6 +75,48 @@ describe("Board", () => {
     const card = screen.getByRole("button", { name: /Task a/ });
     expect(within(card).getByText("Codex")).toBeTruthy();
     expect(card.textContent).toContain("⚠");
+  });
+
+  it("a failed permissions refresh keeps the prompt summary on the card", async () => {
+    let fail = false;
+    const transport = fakeTransport((req) => {
+      if (req.path.startsWith("/permissions")) {
+        if (fail) throw new Error("daemon busy");
+        return [
+          {
+            id: "p1",
+            taskId: "a",
+            toolUseId: "u",
+            tool: "Bash",
+            input: { command: "pnpm add zod" },
+            canRemember: true,
+            createdAt: "x",
+          },
+        ];
+      }
+      if (req.path === "/agents") return [];
+      return [mk("a", "needs_input")];
+    });
+    const client = createClient(transport);
+    const list = vi.spyOn(client, "listPermissions");
+    render(
+      <ClientProvider client={client}>
+        <Board repoId="r" onOpen={() => {}} onNewTask={() => {}} />
+      </ClientProvider>,
+    );
+    expect(await screen.findByText("pnpm add zod")).toBeTruthy();
+    fail = true;
+    act(() =>
+      transport.emit({
+        seq: 1,
+        at: "x",
+        payload: { kind: "permission.resolved", requestId: "p9", taskId: "b", outcome: "allowed" },
+      }),
+    );
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    // The board's own catch ran first; act flushes the render it scheduled.
+    await act(() => list.mock.results[1]!.value.catch(() => {}));
+    expect(screen.getByText("pnpm add zod")).toBeTruthy();
   });
 
   it("shows the error of a failed task and a resume hint for an interrupted one", async () => {

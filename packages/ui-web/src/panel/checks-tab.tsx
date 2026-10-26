@@ -1,31 +1,55 @@
 import { useState } from "react";
 import { useAction, useClient } from "@coord/app-state";
-import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
-import { displayText, type Task } from "@coord/protocol";
+import { colors, space } from "@coord/design-tokens";
+import type { Task } from "@coord/protocol";
+import { InlineError } from "./inline-error";
+import { sentNote } from "./message-box";
 
 const c = colors.light;
 const REVIEWABLE = ["review", "failed", "interrupted"];
 
-/** Check results arrive in plan 3; until then this tab holds the review actions. */
-export function ChecksTab({ task }: { task: Task }) {
+type Draft = { feedback: string | null; onFeedback: (feedback: string | null) => void };
+
+/**
+ * Check results arrive in plan 3; until then this tab holds the review actions.
+ * The send-back draft (null: the box is closed) lives in the panel, so it survives tab switches.
+ */
+export function ChecksTab({ task, feedback, onFeedback }: { task: Task } & Draft) {
+  // Here, not in ReviewActions: a sent-back task leaves review, which unmounts them.
+  const [sent, setSent] = useState<string | null>(null);
   return (
     <div>
       <p style={{ color: c.muted }}>Checks run here once they're set up (coming next)</p>
-      {REVIEWABLE.includes(task.status) && <ReviewActions task={task} />}
+      {REVIEWABLE.includes(task.status) && (
+        <ReviewActions task={task} feedback={feedback} onFeedback={onFeedback} onSent={setSent} />
+      )}
+      {sent && (
+        <p role="status" style={{ color: c.muted }}>
+          {sent}
+        </p>
+      )}
     </div>
   );
 }
 
-function ReviewActions({ task }: { task: Task }) {
+function ReviewActions({
+  task,
+  feedback,
+  onFeedback: setFeedback,
+  onSent,
+}: { task: Task; onSent: (note: string | null) => void } & Draft) {
   const client = useClient();
   const send = useAction(client.sendMessage);
   const discard = useAction(client.discard);
-  const [feedback, setFeedback] = useState<string | null>(null); // null: the box is closed
   const [confirming, setConfirming] = useState(false);
 
   const submit = async () => {
     if (!feedback?.trim() || send.pending) return;
-    if (await send.run(task.id, feedback)) setFeedback(null);
+    const note = sentNote(task.status);
+    if (await send.run(task.id, feedback)) {
+      setFeedback(null);
+      onSent(note);
+    }
   };
 
   return (
@@ -41,14 +65,17 @@ function ReviewActions({ task }: { task: Task }) {
             rows={3}
             style={{ flex: 1, font: "inherit" }}
             value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
+            onChange={(e) => {
+              setFeedback(e.target.value);
+              onSent(null);
+            }}
           />
           <button disabled={send.pending || !feedback.trim()} onClick={() => void submit()}>
             Send
           </button>
         </div>
       )}
-      <Error message={send.error} />
+      <InlineError error={send.error} />
       {confirming && (
         <span>
           Discard this task? The worktree is removed; its branch is kept for 14 days.{" "}
@@ -58,14 +85,7 @@ function ReviewActions({ task }: { task: Task }) {
           <button onClick={() => setConfirming(false)}>Keep</button>
         </span>
       )}
-      <Error message={discard.error} />
+      <InlineError error={discard.error} />
     </div>
   );
 }
-
-const Error = ({ message }: { message: string | null }) =>
-  message && (
-    <span role="alert" style={{ color: statusColors.failed, fontSize: fontSize.sm }}>
-      {displayText(message)}
-    </span>
-  );

@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -72,6 +73,32 @@ const type = (label: string, value: string) =>
 const prompt = (v: string) => type("What should the agent do?", v);
 
 describe("NewTaskForm", () => {
+  it("focuses the prompt on open and gives focus back on close", () => {
+    const transport = fakeTransport(() => []);
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>+ New task</button>
+          {open && (
+            <NewTaskForm repoId="a" surface="web" onCreated={() => {}} onClose={() => setOpen(false)} />
+          )}
+        </>
+      );
+    }
+    render(
+      <ClientProvider client={createClient(transport)}>
+        <Harness />
+      </ClientProvider>,
+    );
+    const opener = screen.getByRole("button", { name: "+ New task" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByLabelText("What should the agent do?"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("shows the repo path and base branch", async () => {
     setup();
     expect(await screen.findByText("/code/a · base main")).toBeTruthy();

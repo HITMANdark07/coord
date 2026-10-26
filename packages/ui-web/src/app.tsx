@@ -106,7 +106,7 @@ function DaemonBanner() {
     daemon.status === "ok"
       ? `Daemon connected · v${daemon.data.daemonVersion} · protocol ${daemon.data.protocolVersion}`
       : daemon.status === "error"
-        ? `Daemon unreachable: ${daemon.error}`
+        ? `Daemon unreachable: ${displayText(daemon.error)}`
         : "Connecting to daemon…";
   return (
     <p

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient, DaemonError, type TransportRequest } from "@coord/client";
@@ -302,6 +303,81 @@ describe("TaskPanel", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc on a checkbox closes the panel: only text fields guard their value", async () => {
+    const { onClose } = setup();
+    await screen.findByRole("heading", { name: "Fix login redirect" });
+    const box = document.body.appendChild(
+      Object.assign(document.createElement("input"), { type: "checkbox" }),
+    );
+    fireEvent.keyDown(box, { key: "Escape" });
+    box.remove();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("focus moves into the panel on open and back to where it was on close", async () => {
+    const transport = fakeTransport((req) => (req.path === "/tasks/t" ? task() : []));
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open</button>
+          {open && <TaskPanel taskId="t" surface="desktop" onClose={() => setOpen(false)} />}
+        </>
+      );
+    }
+    render(
+      <ClientProvider client={createClient(transport)}>
+        <Harness />
+      </ClientProvider>,
+    );
+    const opener = screen.getByRole("button", { name: "Open" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByRole("complementary", { name: "Task" }));
+    await screen.findByRole("heading", { name: "Fix login redirect" });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("drafts survive a tab switch", async () => {
+    setup({ task: { status: "review" } });
+    const box = () => screen.getByRole("textbox", { name: "Message the agent" }) as HTMLTextAreaElement;
+    const feedback = () => screen.getByRole("textbox", { name: "Feedback" }) as HTMLTextAreaElement;
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message the agent" }), {
+      target: { value: "half a follow-up" },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send back with feedback…" }));
+    fireEvent.change(feedback(), { target: { value: "half the feedback" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Live" }));
+    expect(box().value).toBe("half a follow-up");
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }));
+    expect(feedback().value).toBe("half the feedback");
+  });
+
+  it("a sent follow-up is confirmed until the next keystroke", async () => {
+    setup();
+    const box = await screen.findByRole("textbox", { name: "Message the agent" });
+    fireEvent.change(box, { target: { value: "also cover logout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Sent — delivered when the current turn ends")).toBeTruthy();
+    fireEvent.change(box, { target: { value: "a" } });
+    expect(screen.queryByText(/^Sent/)).toBeNull();
+  });
+
+  it("a sent-back review is confirmed until the next keystroke", async () => {
+    setup({ task: { status: "review" } });
+    fireEvent.click(await screen.findByRole("tab", { name: "Checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send back with feedback…" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Feedback" }), { target: { value: "also logout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Sent")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send back with feedback…" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Feedback" }), { target: { value: "a" } });
+    expect(screen.queryByText("Sent")).toBeNull();
   });
 
   it("Esc closes the panel", async () => {

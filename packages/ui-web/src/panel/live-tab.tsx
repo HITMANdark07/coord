@@ -1,4 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { usePermissions, useTaskEvents } from "@coord/app-state";
 import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
 import { displayText, type Task } from "@coord/protocol";
@@ -17,7 +24,15 @@ const ROW_STYLE: Record<LiveRow["kind"], CSSProperties> = {
   status: { color: c.muted, fontSize: fontSize.sm },
 };
 
-export function LiveTab({ task }: { task: Task }) {
+export function LiveTab({
+  task,
+  message,
+  onMessage,
+}: {
+  task: Task;
+  message: string;
+  onMessage: Dispatch<SetStateAction<string>>;
+}) {
   const events = useTaskEvents(task.id);
   const permissions = usePermissions(task.id);
   const rows = useMemo(() => liveRows(events.events), [events.events]);
@@ -64,7 +79,7 @@ export function LiveTab({ task }: { task: Task }) {
           <PermissionPrompt key={p.id} request={p} agent={agentLabel(task.agent)} />
         ))}
       </div>
-      <MessageBox task={task} />
+      <MessageBox task={task} text={message} onText={onMessage} />
     </div>
   );
 }

@@ -41,7 +41,7 @@ export function Board({
 
   const data = tasks.status === "loading" ? [] : (tasks.data ?? []);
   const groups = groupTasks(data, { now, showClosed });
-  const pending = permissions.status === "ok" ? permissions.data : [];
+  const pending = permissions.status === "loading" ? [] : (permissions.data ?? []);
 
   return (
     <section>
