@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { Command } from "commander";
-import type { WtoClient } from "@wto/client";
+import type { CoordClient } from "@coord/client";
 
-// `pnpm wto` runs this script from apps/cli; INIT_CWD is the directory the user ran it in.
+// `pnpm coord` runs this script from apps/cli; INIT_CWD is the directory the user ran it in.
 const userCwd = () => process.env.INIT_CWD ?? process.cwd();
 
 export interface ProgramDeps {
@@ -11,8 +11,8 @@ export interface ProgramDeps {
   readToken?: () => Promise<string | undefined>;
 }
 
-export function buildProgram(client: WtoClient, { log = console.log, readToken }: ProgramDeps = {}) {
-  const program = new Command("wto").description("Run coding agents in parallel git worktrees");
+export function buildProgram(client: CoordClient, { log = console.log, readToken }: ProgramDeps = {}) {
+  const program = new Command("coord").description("Run coding agents in parallel git worktrees");
 
   program
     .command("web")

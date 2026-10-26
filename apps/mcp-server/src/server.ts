@@ -1,14 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { WtoClient } from "@wto/client";
+import type { CoordClient } from "@coord/client";
 
 const json = (value: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
 });
 
 /** MCP tools that let Claude Code drive the orchestrator (PRD §7.2). */
-export function createMcpServer(client: WtoClient) {
-  const server = new McpServer({ name: "wto", version: "0.1.0" });
+export function createMcpServer(client: CoordClient) {
+  const server = new McpServer({ name: "coord", version: "0.1.0" });
 
   server.registerTool(
     "list_tasks",

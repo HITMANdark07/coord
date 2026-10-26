@@ -4,7 +4,7 @@ import { z } from "zod";
 export const PROTOCOL_VERSION = "0.1.0";
 
 /** Every request carries the client's protocol version in this header (HTTP) or field (relay frames). */
-export const PROTOCOL_HEADER = "x-wto-protocol";
+export const PROTOCOL_HEADER = "x-coord-protocol";
 
 export const DEFAULT_DAEMON_PORT = 4545;
 
@@ -13,8 +13,8 @@ export const DEFAULT_DAEMON_PORT = 4545;
  * headers on a WebSocket, so /events offers two subprotocols: EVENTS_SUBPROTOCOL and
  * `${TOKEN_SUBPROTOCOL_PREFIX}<token>`; the daemon answers with EVENTS_SUBPROTOCOL.
  */
-export const EVENTS_SUBPROTOCOL = "wto.v1";
-export const TOKEN_SUBPROTOCOL_PREFIX = "wto.token.";
+export const EVENTS_SUBPROTOCOL = "coord.v1";
+export const TOKEN_SUBPROTOCOL_PREFIX = "coord.token.";
 
 /**
  * The daemon accepts clients on the same major version and the current or previous minor,

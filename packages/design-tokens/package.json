@@ -1,5 +1,5 @@
 {
-  "name": "@wto/design-tokens",
+  "name": "@coord/design-tokens",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,10 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@wto/protocol": "workspace:*"
+    "@coord/protocol": "workspace:*"
   },
   "devDependencies": {
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

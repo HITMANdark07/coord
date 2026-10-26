@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DaemonEvent } from "@wto/protocol";
+import type { DaemonEvent } from "@coord/protocol";
 import { useClient } from "./client-context";
 
 export type QueryState<T> =

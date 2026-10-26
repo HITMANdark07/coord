@@ -8,7 +8,7 @@
 rules:
   - id: "apps-never-import-the-daemon-by-path"
     primitive: "import-forbidden"
-    description: "Apps reach the daemon only through @wto/client; they never import @wto/core (AGENTS.md rule 5)."
+    description: "Apps reach the daemon only through @coord/client; they never import @coord/core (AGENTS.md rule 5)."
     when:
       source_glob: "apps/**"
     must:
@@ -16,11 +16,11 @@ rules:
     scope: "all"
   - id: "apps-never-import-the-daemon-by-name"
     primitive: "import-forbidden"
-    description: "Apps reach the daemon only through @wto/client; they never import @wto/core (AGENTS.md rule 5)."
+    description: "Apps reach the daemon only through @coord/client; they never import @coord/core (AGENTS.md rule 5)."
     when:
       source_glob: "apps/**"
     must:
-      target_glob_forbidden: "@wto/core"
+      target_glob_forbidden: "@coord/core"
     scope: "all"
   - id: "apps-never-import-agent-adapters-by-path"
     primitive: "import-forbidden"
@@ -36,11 +36,11 @@ rules:
     when:
       source_glob: "apps/**"
     must:
-      target_glob_forbidden: "@wto/adapter-*"
+      target_glob_forbidden: "@coord/adapter-*"
     scope: "all"
   - id: "electron-renderer-has-no-node-packages-by-path"
     primitive: "import-forbidden"
-    description: "The Electron renderer is sandboxed: no Node-only packages such as @wto/local-daemon (AGENTS.md rule 8)."
+    description: "The Electron renderer is sandboxed: no Node-only packages such as @coord/local-daemon (AGENTS.md rule 8)."
     when:
       source_glob: "apps/desktop/src/renderer/**"
     must:
@@ -48,15 +48,15 @@ rules:
     scope: "all"
   - id: "electron-renderer-has-no-node-packages-by-name"
     primitive: "import-forbidden"
-    description: "The Electron renderer is sandboxed: no Node-only packages such as @wto/local-daemon (AGENTS.md rule 8)."
+    description: "The Electron renderer is sandboxed: no Node-only packages such as @coord/local-daemon (AGENTS.md rule 8)."
     when:
       source_glob: "apps/desktop/src/renderer/**"
     must:
-      target_glob_forbidden: "@wto/local-daemon"
+      target_glob_forbidden: "@coord/local-daemon"
     scope: "all"
   - id: "mobile-never-imports-ui-web-by-path"
     primitive: "import-forbidden"
-    description: "@wto/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
+    description: "@coord/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
     when:
       source_glob: "apps/mobile/**"
     must:
@@ -64,15 +64,15 @@ rules:
     scope: "all"
   - id: "mobile-never-imports-ui-web-by-name"
     primitive: "import-forbidden"
-    description: "@wto/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
+    description: "@coord/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
     when:
       source_glob: "apps/mobile/**"
     must:
-      target_glob_forbidden: "@wto/ui-web"
+      target_glob_forbidden: "@coord/ui-web"
     scope: "all"
   - id: "ui-never-imports-the-daemon-by-path"
     primitive: "import-forbidden"
-    description: "Shared UI code reaches the daemon only through @wto/client and @wto/app-state."
+    description: "Shared UI code reaches the daemon only through @coord/client and @coord/app-state."
     when:
       source_glob: "packages/ui-web/**"
     must:
@@ -80,9 +80,9 @@ rules:
     scope: "all"
   - id: "ui-never-imports-the-daemon-by-name"
     primitive: "import-forbidden"
-    description: "Shared UI code reaches the daemon only through @wto/client and @wto/app-state."
+    description: "Shared UI code reaches the daemon only through @coord/client and @coord/app-state."
     when:
       source_glob: "packages/ui-web/**"
     must:
-      target_glob_forbidden: "@wto/core"
+      target_glob_forbidden: "@coord/core"
     scope: "all"

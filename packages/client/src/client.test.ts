@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROTOCOL_HEADER, PROTOCOL_VERSION, type Task } from "@wto/protocol";
+import { PROTOCOL_HEADER, PROTOCOL_VERSION, type Task } from "@coord/protocol";
 import { createClient } from "./client";
 import { fakeTransport } from "./testing";
 import { DaemonError, httpTransport } from "./transport";

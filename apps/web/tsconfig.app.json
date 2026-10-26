@@ -1,5 +1,5 @@
 {
-  "extends": "@wto/tsconfig/dom.json",
+  "extends": "@coord/tsconfig/dom.json",
   "compilerOptions": {
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },

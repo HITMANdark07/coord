@@ -1,13 +1,13 @@
 import { StatusBar } from "expo-status-bar";
 import { StyleSheet, Text, View } from "react-native";
-import { colors, fontSize, space } from "@wto/design-tokens";
-import { PROTOCOL_VERSION } from "@wto/protocol";
+import { colors, fontSize, space } from "@coord/design-tokens";
+import { PROTOCOL_VERSION } from "@coord/protocol";
 
-// Phase 4: pair with the desktop over the relay, then wrap screens in <ClientProvider> from @wto/app-state.
+// Phase 4: pair with the desktop over the relay, then wrap screens in <ClientProvider> from @coord/app-state.
 export default function App() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Worktree Orchestrator</Text>
+      <Text style={styles.title}>Coord</Text>
       <Text style={styles.muted}>protocol {PROTOCOL_VERSION} · pairing comes in Phase 4</Text>
       <StatusBar style="auto" />
     </View>

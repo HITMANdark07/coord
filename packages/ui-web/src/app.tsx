@@ -1,6 +1,6 @@
-import { useDaemonStatus, useTasks } from "@wto/app-state";
-import { colors, fontSize, radius, space, statusColors } from "@wto/design-tokens";
-import type { Task } from "@wto/protocol";
+import { useDaemonStatus, useTasks } from "@coord/app-state";
+import { colors, fontSize, radius, space, statusColors } from "@coord/design-tokens";
+import type { Task } from "@coord/protocol";
 
 const c = colors.light;
 
@@ -9,7 +9,7 @@ export function App({ surface }: { surface: "desktop" | "web" }) {
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", color: c.text, padding: space.xl, maxWidth: 880 }}>
       <header style={{ display: "flex", alignItems: "baseline", gap: space.md, marginBottom: space.xl }}>
-        <h1 style={{ fontSize: fontSize.xxl, margin: 0 }}>Worktree Orchestrator</h1>
+        <h1 style={{ fontSize: fontSize.xxl, margin: 0 }}>Coord</h1>
         <span style={{ color: c.muted, fontSize: fontSize.sm }}>{surface}</span>
       </header>
       <DaemonBanner />

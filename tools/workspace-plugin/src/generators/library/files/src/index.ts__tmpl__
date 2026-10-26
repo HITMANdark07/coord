@@ -1,2 +1,2 @@
-// Public API of @wto/<%= name %>. Export only what other packages need.
+// Public API of @coord/<%= name %>. Export only what other packages need.
 export const name = "<%= name %>";

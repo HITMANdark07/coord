@@ -4,10 +4,10 @@ import { VitePWA } from "vite-plugin-pwa";
 import { pwaManifest } from "./pwa-manifest";
 
 // Dev only: the browser reaches the local daemon through this proxy (no CORS, no public port).
-// The proxy only forwards: the browser sends the daemon token itself (from the `pnpm wto web`
+// The proxy only forwards: the browser sends the daemon token itself (from the `pnpm coord web`
 // link), so a local process that can reach this port gains nothing. Phones use the relay (Phase 4).
 const daemonProxy: ProxyOptions = {
-  target: `http://127.0.0.1:${process.env.WTO_PORT ?? "4545"}`,
+  target: `http://127.0.0.1:${process.env.COORD_PORT ?? "4545"}`,
   ws: true,
   rewrite: (path) => path.replace(/^\/api/, ""),
 };

@@ -1,21 +1,21 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ClientProvider } from "@wto/app-state";
-import { createClient, type Transport } from "@wto/client";
-import { App } from "@wto/ui-web";
-import { fromIpcReply, type WtoBridge } from "../../shared/ipc";
+import { ClientProvider } from "@coord/app-state";
+import { createClient, type Transport } from "@coord/client";
+import { App } from "@coord/ui-web";
+import { fromIpcReply, type CoordBridge } from "../../shared/ipc";
 
 declare global {
   interface Window {
-    wto: WtoBridge;
+    coord: CoordBridge;
   }
 }
 
 // The renderer has no Node access; daemon calls and events go through the preload bridge.
 const ipcTransport: Transport = {
-  request: async (req) => fromIpcReply(await window.wto.request(req)),
+  request: async (req) => fromIpcReply(await window.coord.request(req)),
   subscribe: ({ onEvent, onStatus }) =>
-    window.wto.onPush((push) => ("event" in push ? onEvent(push.event) : onStatus?.(push.status))),
+    window.coord.onPush((push) => ("event" in push ? onEvent(push.event) : onStatus?.(push.status))),
 };
 
 createRoot(document.getElementById("root")!).render(

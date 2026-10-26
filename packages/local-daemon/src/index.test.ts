@@ -2,7 +2,7 @@ import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DaemonError } from "@wto/client";
+import { DaemonError } from "@coord/client";
 import {
   createToken,
   daemonInfoPath,
@@ -12,7 +12,7 @@ import {
   writeDaemonInfo,
 } from "./index";
 
-const tempHome = () => mkdtemp(join(tmpdir(), "wto-home-"));
+const tempHome = () => mkdtemp(join(tmpdir(), "coord-home-"));
 const info = (pid = 1) => ({ port: 4999, token: createToken(), pid, protocolVersion: "0.1.0" });
 
 describe("daemon info file", () => {

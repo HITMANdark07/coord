@@ -13,11 +13,13 @@ describe("library generator", () => {
     await libraryGenerator(tree, { name: "worktree-manager", type: "service", platform: "node" });
 
     const pkg = readJson(tree, "packages/worktree-manager/package.json");
-    expect(pkg.name).toBe("@wto/worktree-manager");
+    expect(pkg.name).toBe("@coord/worktree-manager");
     expect(pkg.nx.tags).toEqual(["type:service", "platform:node"]);
     expect(Object.keys(pkg.scripts)).toEqual(["typecheck", "lint", "test"]);
     expect(pkg.devDependencies["@types/node"]).toBeDefined();
-    expect(readJson(tree, "packages/worktree-manager/tsconfig.json").extends).toBe("@wto/tsconfig/node.json");
+    expect(readJson(tree, "packages/worktree-manager/tsconfig.json").extends).toBe(
+      "@coord/tsconfig/node.json",
+    );
     expect(tree.exists("packages/worktree-manager/src/index.test.ts")).toBe(true);
   });
 

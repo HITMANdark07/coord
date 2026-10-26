@@ -24,7 +24,7 @@ const depConstraints = [
     sourceTag: "type:daemon",
     onlyDependOnLibsWithTags: ["type:contract", "type:lib", "type:adapter", "type:service"],
   },
-  // Apps never import the daemon, adapters or services: they talk to the daemon through @wto/client.
+  // Apps never import the daemon, adapters or services: they talk to the daemon through @coord/client.
   { sourceTag: "type:app", onlyDependOnLibsWithTags: ["type:contract", "type:lib", "type:state", "type:ui"] },
   { sourceTag: "type:tooling", onlyDependOnLibsWithTags: [] },
   { sourceTag: "type:config", onlyDependOnLibsWithTags: [] },

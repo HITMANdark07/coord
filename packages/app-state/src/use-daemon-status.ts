@@ -1,4 +1,4 @@
-import type { Health } from "@wto/protocol";
+import type { Health } from "@coord/protocol";
 import { useClient } from "./client-context";
 import { useLiveQuery, type QueryState } from "./use-live-query";
 

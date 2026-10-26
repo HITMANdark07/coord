@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createClient, type WtoClient } from "@wto/client";
-import { fakeTransport } from "@wto/client/testing";
-import type { TransportRequest } from "@wto/client";
+import { createClient, type CoordClient } from "@coord/client";
+import { fakeTransport } from "@coord/client/testing";
+import type { TransportRequest } from "@coord/client";
 import { buildProgram } from "./program";
 
 const health = { ok: true, protocolVersion: "0.1.0", daemonVersion: "0.1.0" };
 
-async function run(client: WtoClient, ...args: string[]) {
+async function run(client: CoordClient, ...args: string[]) {
   const lines: string[] = [];
   await buildProgram(client, { log: (l) => lines.push(l), readToken: async () => "tok" }).parseAsync(args, {
     from: "user",
@@ -14,7 +14,7 @@ async function run(client: WtoClient, ...args: string[]) {
   return lines;
 }
 
-describe("wto cli", () => {
+describe("coord cli", () => {
   const initCwd = process.env.INIT_CWD;
   afterEach(() => {
     if (initCwd === undefined) delete process.env.INIT_CWD;

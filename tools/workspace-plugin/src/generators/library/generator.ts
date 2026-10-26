@@ -4,7 +4,7 @@ import type { LibraryGeneratorSchema } from "./schema.d.ts";
 
 const TSCONFIG_PRESET = { any: "base", node: "node", react: "react", dom: "dom" } as const;
 
-/** `nx g @wto/workspace-plugin:library <name> --type=lib --platform=any` */
+/** `nx g @coord/workspace-plugin:library <name> --type=lib --platform=any` */
 export default async function libraryGenerator(tree: Tree, options: LibraryGeneratorSchema) {
   const name = names(options.name).fileName;
   const root = `packages/${name}`;

@@ -1,5 +1,5 @@
 {
-  "name": "@wto/relay",
+  "name": "@coord/relay",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
   "devDependencies": {
     "@types/node": "^24",
     "@types/ws": "8.18.2",
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

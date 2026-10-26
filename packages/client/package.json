@@ -1,5 +1,5 @@
 {
-  "name": "@wto/client",
+  "name": "@coord/client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,11 +13,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@wto/protocol": "workspace:*",
+    "@coord/protocol": "workspace:*",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

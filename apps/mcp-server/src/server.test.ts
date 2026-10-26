@@ -1,11 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { createClient } from "@wto/client";
-import { fakeTransport } from "@wto/client/testing";
+import { createClient } from "@coord/client";
+import { fakeTransport } from "@coord/client/testing";
 import { createMcpServer } from "./server";
 
-describe("wto MCP server", () => {
+describe("coord MCP server", () => {
   it("exposes the task tools to an MCP client", async () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await createMcpServer(createClient(fakeTransport(() => []))).connect(serverSide);

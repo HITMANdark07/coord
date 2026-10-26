@@ -1,5 +1,5 @@
 {
-  "name": "@wto/mcp-server",
+  "name": "@coord/mcp-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@wto/client": "workspace:*",
-    "@wto/local-daemon": "workspace:*",
+    "@coord/client": "workspace:*",
+    "@coord/local-daemon": "workspace:*",
     "tsx": "4.23.15",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24",
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

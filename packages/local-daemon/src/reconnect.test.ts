@@ -35,7 +35,7 @@ const live = () => FakeSocket.all.filter((s) => s.open);
 describe("localTransport reconnects", () => {
   it("keeps exactly one connection after a drop, using the daemon's new token", async () => {
     FakeSocket.all = [];
-    const home = await mkdtemp(join(tmpdir(), "wto-home-"));
+    const home = await mkdtemp(join(tmpdir(), "coord-home-"));
     await writeDaemonInfo({ port: 4998, token: createToken(), pid: 1, protocolVersion: "0.1.0" }, home);
     const events: unknown[] = [];
     const stop = localTransport({
@@ -54,7 +54,7 @@ describe("localTransport reconnects", () => {
     await tick(40);
 
     expect(live()).toHaveLength(1);
-    expect(live()[0]?.protocols).toContain(`wto.token.${restartedToken}`);
+    expect(live()[0]?.protocols).toContain(`coord.token.${restartedToken}`);
     live()[0]?.onmessage?.({ data: '{"n":1}' });
     expect(events).toEqual([{ n: 1 }]);
 

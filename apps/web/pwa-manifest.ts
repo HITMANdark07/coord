@@ -2,8 +2,8 @@ import type { ManifestOptions } from "vite-plugin-pwa";
 
 /** Web app manifest: what makes the PWA installable on phones (PRD FR-47). */
 export const pwaManifest: Partial<ManifestOptions> = {
-  name: "Worktree Orchestrator",
-  short_name: "wto",
+  name: "Coord",
+  short_name: "coord",
   description: "Run and steer coding agents in parallel worktrees",
   theme_color: "#4f46e5",
   background_color: "#ffffff",

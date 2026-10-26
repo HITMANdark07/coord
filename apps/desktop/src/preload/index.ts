@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { DAEMON_EVENT_CHANNEL, DAEMON_REQUEST_CHANNEL, type DaemonPush, type WtoBridge } from "../shared/ipc";
+import {
+  DAEMON_EVENT_CHANNEL,
+  DAEMON_REQUEST_CHANNEL,
+  type DaemonPush,
+  type CoordBridge,
+} from "../shared/ipc";
 
-const bridge: WtoBridge = {
+const bridge: CoordBridge = {
   request: (req) => ipcRenderer.invoke(DAEMON_REQUEST_CHANNEL, req),
   onPush: (listener) => {
     const handler = (_event: IpcRendererEvent, push: DaemonPush) => listener(push);
@@ -10,4 +15,4 @@ const bridge: WtoBridge = {
   },
 };
 
-contextBridge.exposeInMainWorld("wto", bridge);
+contextBridge.exposeInMainWorld("coord", bridge);

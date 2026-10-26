@@ -11,7 +11,7 @@ import {
   type ErrorBody,
   type ErrorCode,
   type Health,
-} from "@wto/protocol";
+} from "@coord/protocol";
 import { EventBus } from "./event-bus";
 import { TaskStore } from "./store";
 
@@ -48,7 +48,7 @@ function clientProtocol(req: FastifyRequest): string | undefined {
   return typeof query?.protocol === "string" ? query.protocol : undefined;
 }
 
-/** Bearer header (HTTP, proxies), or a `wto.token.<token>` WebSocket subprotocol (browsers). */
+/** Bearer header (HTTP, proxies), or a `coord.token.<token>` WebSocket subprotocol (browsers). */
 function presentedToken(req: FastifyRequest): string | undefined {
   const auth = req.headers.authorization;
   if (auth?.startsWith("Bearer ")) return auth.slice("Bearer ".length);
@@ -68,7 +68,7 @@ function tokensMatch(presented: string | undefined, expected: string): boolean {
 }
 
 export interface ServerOptions {
-  /** Every request except /health must present it (see @wto/local-daemon for how clients find it). */
+  /** Every request except /health must present it (see @coord/local-daemon for how clients find it). */
   token: string;
   /** Exact browser origins that may call the daemon. Requests without an Origin are not browsers. */
   allowedOrigins?: string[];
@@ -81,7 +81,7 @@ export function createServer(options: ServerOptions) {
   const allowedOrigins = new Set(options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS);
 
   const app = Fastify({
-    logger: process.env.WTO_LOG_LEVEL ? { level: process.env.WTO_LOG_LEVEL } : false,
+    logger: process.env.COORD_LOG_LEVEL ? { level: process.env.COORD_LOG_LEVEL } : false,
     bodyLimit: 1024 * 1024,
     // Shutdown must not wait on idle keep-alive or half-open sockets.
     forceCloseConnections: true,

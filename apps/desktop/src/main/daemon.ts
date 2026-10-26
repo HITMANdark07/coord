@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { app } from "electron";
-import { isCompatibleProtocol, PROTOCOL_VERSION, type Health } from "@wto/protocol";
+import { isCompatibleProtocol, PROTOCOL_VERSION, type Health } from "@coord/protocol";
 
 const STARTUP_TIMEOUT_MS = 15_000;
 
@@ -14,11 +14,11 @@ const STARTUP_TIMEOUT_MS = 15_000;
 export async function ensureDaemon(health: () => Promise<Health>): Promise<void> {
   if (await isUp(health)) return;
   // `pnpm dev` starts the daemon itself (with watch mode); just wait for it.
-  if (process.env.WTO_EXTERNAL_DAEMON) return waitUntilUp(health);
+  if (process.env.COORD_EXTERNAL_DAEMON) return waitUntilUp(health);
   if (app.isPackaged) throw new Error("bundled daemon is not implemented yet (Phase 2)");
 
   let spawnError: Error | undefined;
-  const child = spawn("pnpm", ["--filter", "@wto/core", "start"], {
+  const child = spawn("pnpm", ["--filter", "@coord/core", "start"], {
     cwd: join(app.getAppPath(), "../.."),
     detached: true,
     stdio: "ignore",
@@ -42,7 +42,7 @@ async function waitUntilUp(health: () => Promise<Health>, failed: () => Error | 
   throw new Error(`daemon did not answer within ${STARTUP_TIMEOUT_MS / 1000}s`);
 }
 
-/** Up = a wto daemon (valid Health) that speaks a compatible protocol. */
+/** Up = a coord daemon (valid Health) that speaks a compatible protocol. */
 async function isUp(health: () => Promise<Health>): Promise<boolean> {
   let h: Health;
   try {

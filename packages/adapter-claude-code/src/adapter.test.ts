@@ -7,7 +7,7 @@ import type {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
-import type { AgentEvent, PermissionRequest, RunContext } from "@wto/protocol";
+import type { AgentEvent, PermissionRequest, RunContext } from "@coord/protocol";
 import { buildOptions, CLAUDE_SETTING_SOURCES, createClaudeCodeAdapter, permissionBridge } from "./adapter";
 import { toAgentEvents } from "./events";
 

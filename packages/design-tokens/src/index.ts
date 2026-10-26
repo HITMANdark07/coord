@@ -1,4 +1,4 @@
-import type { ReadTaskStatus } from "@wto/protocol";
+import type { ReadTaskStatus } from "@coord/protocol";
 
 // Shared by desktop (CSS-in-JS / CSS vars) and mobile (StyleSheet). Plain values only.
 export const colors = {

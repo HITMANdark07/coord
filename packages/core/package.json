@@ -1,5 +1,5 @@
 {
-  "name": "@wto/core",
+  "name": "@coord/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,16 +15,16 @@
   },
   "dependencies": {
     "@fastify/websocket": "11.3.4",
-    "@wto/local-daemon": "workspace:*",
-    "@wto/protocol": "workspace:*",
+    "@coord/local-daemon": "workspace:*",
+    "@coord/protocol": "workspace:*",
     "fastify": "5.12.7",
     "tsx": "4.23.15",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24",
-    "@wto/client": "workspace:*",
-    "@wto/tsconfig": "workspace:*",
+    "@coord/client": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

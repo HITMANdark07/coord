@@ -1,10 +1,10 @@
-import { DaemonError, type ConnectionStatus, type TransportRequest } from "@wto/client";
-import type { ErrorBody } from "@wto/protocol";
+import { DaemonError, type ConnectionStatus, type TransportRequest } from "@coord/client";
+import type { ErrorBody } from "@coord/protocol";
 
 /** Renderer → main: a daemon request, forwarded by the main process. */
-export const DAEMON_REQUEST_CHANNEL = "wto:daemon-request";
+export const DAEMON_REQUEST_CHANNEL = "coord:daemon-request";
 /** Main → renderer: daemon push events. */
-export const DAEMON_EVENT_CHANNEL = "wto:daemon-event";
+export const DAEMON_EVENT_CHANNEL = "coord:daemon-event";
 
 const METHODS = new Set<TransportRequest["method"]>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
@@ -48,7 +48,7 @@ export function fromIpcReply(reply: IpcReply): unknown {
 /** Main → renderer message: a daemon event or a change in the daemon connection. */
 export type DaemonPush = { event: unknown } | { status: ConnectionStatus };
 
-export interface WtoBridge {
+export interface CoordBridge {
   request(req: TransportRequest): Promise<IpcReply>;
   onPush(listener: (push: DaemonPush) => void): () => void;
 }

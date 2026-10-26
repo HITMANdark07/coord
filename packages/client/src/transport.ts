@@ -6,9 +6,9 @@ import {
   PROTOCOL_VERSION,
   TOKEN_SUBPROTOCOL_PREFIX,
   type ErrorCode,
-} from "@wto/protocol";
+} from "@coord/protocol";
 
-/** URL of a daemon on this machine. Node callers pass `process.env.WTO_PORT`. */
+/** URL of a daemon on this machine. Node callers pass `process.env.COORD_PORT`. */
 export function localDaemonUrl(port: string | number = DEFAULT_DAEMON_PORT): string {
   return `http://127.0.0.1:${port}`;
 }
@@ -54,7 +54,7 @@ export class DaemonError extends Error {
 
 export interface HttpTransportOptions {
   baseUrl?: string;
-  /** The daemon's auth token (see @wto/local-daemon). Omit only when a proxy adds it. */
+  /** The daemon's auth token (see @coord/local-daemon). Omit only when a proxy adds it. */
   token?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;

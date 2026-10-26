@@ -1,4 +1,4 @@
-import type { DaemonEvent } from "@wto/protocol";
+import type { DaemonEvent } from "@coord/protocol";
 import type { ConnectionStatus, EventHandlers, Transport, TransportRequest } from "./transport";
 
 /**

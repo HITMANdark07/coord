@@ -1,5 +1,5 @@
 {
-  "name": "@wto/protocol",
+  "name": "@coord/protocol",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "typescript": "~6.0.3"
   },
   "nx": {

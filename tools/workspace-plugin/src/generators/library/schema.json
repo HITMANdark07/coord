@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/schema",
-  "$id": "WtoLibrary",
+  "$id": "CoordLibrary",
   "title": "Workspace library",
   "type": "object",
   "properties": {
     "name": {
       "type": "string",
-      "description": "Package folder and name, e.g. `worktree-manager` creates packages/worktree-manager (@wto/worktree-manager)",
+      "description": "Package folder and name, e.g. `worktree-manager` creates packages/worktree-manager (@coord/worktree-manager)",
       "pattern": "^[a-z][a-z0-9-]*$",
       "$default": {
         "$source": "argv",

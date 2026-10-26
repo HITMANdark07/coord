@@ -12,7 +12,7 @@ coverage/
 *.generated.ts
 *.generated.tsx
 
-# wto build output and caches
+# coord build output and caches
 out/
 dev-dist/
 .expo/

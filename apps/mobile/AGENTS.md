@@ -1,4 +1,4 @@
-This is the Expo / React Native app of the wto monorepo. The repo-wide rules in the root [AGENTS.md](../../AGENTS.md) apply here too. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is the Expo / React Native app of the coord monorepo. The repo-wide rules in the root [AGENTS.md](../../AGENTS.md) apply here too. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
 ## Expo has changed: do not trust your training data
 
@@ -13,7 +13,7 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 Run checks through Nx from the repo root, so the shared ESLint config, caching and boundary rules apply:
 
 ```bash
-pnpm exec nx run-many -t lint typecheck test build -p @wto/mobile   # definition of done for this app
+pnpm exec nx run-many -t lint typecheck test build -p @coord/mobile   # definition of done for this app
 pnpm mobile                                                         # expo start
 ```
 
@@ -41,7 +41,7 @@ The app is still a single `App.tsx`. When screens are added (Phase 4), adopt **E
 
 Docs: https://docs.expo.dev/router/introduction.md
 
-Data comes from `@wto/app-state` hooks inside `<ClientProvider>`, with a relay Transport (Phase 4). Don't import `@wto/ui-web`: it is React DOM, and lint blocks it.
+Data comes from `@coord/app-state` hooks inside `<ClientProvider>`, with a relay Transport (Phase 4). Don't import `@coord/ui-web`: it is React DOM, and lint blocks it.
 
 ## Building with EAS
 

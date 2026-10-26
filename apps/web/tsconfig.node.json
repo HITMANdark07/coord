@@ -1,4 +1,4 @@
 {
-  "extends": "@wto/tsconfig/node.json",
+  "extends": "@coord/tsconfig/node.json",
   "include": ["vite.config.ts", "pwa-manifest.ts", "pwa-manifest.test.ts"]
 }

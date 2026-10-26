@@ -1,5 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent } from "@wto/protocol";
+import type { AgentEvent } from "@coord/protocol";
 
 /** Maps one Claude Agent SDK message to zero or more agent-neutral events. Unknown messages are ignored. */
 export function toAgentEvents(msg: SDKMessage): AgentEvent[] {

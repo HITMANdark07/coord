@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ClientProvider } from "@wto/app-state";
-import { createClient, httpTransport } from "@wto/client";
-import { App } from "@wto/ui-web";
+import { ClientProvider } from "@coord/app-state";
+import { createClient, httpTransport } from "@coord/client";
+import { App } from "@coord/ui-web";
 import { takeDaemonToken } from "./daemon-token";
 
 const token = takeDaemonToken(window.location, window.history, window.sessionStorage);
@@ -15,7 +15,7 @@ createRoot(document.getElementById("root")!).render(
     <ClientProvider client={client}>
       {token ? null : (
         <p style={{ fontFamily: "system-ui, sans-serif", padding: 16 }}>
-          Not connected to a daemon. Open the link printed by <code>pnpm wto web</code>.
+          Not connected to a daemon. Open the link printed by <code>pnpm coord web</code>.
         </p>
       )}
       <App surface="web" />

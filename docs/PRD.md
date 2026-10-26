@@ -1,6 +1,15 @@
-# PRD: Multi-Agent Worktree Orchestrator
+# PRD: Coord — run coding agents in parallel git worktrees
 
-**Date:** 2026-10-26 · **Status:** Draft v0.4 · **Working name:** Worktree Orchestrator (`wto`)
+**Date:** 2026-10-26 · **Status:** Draft v0.5 · **Name:** Coord (command `coord`)
+
+**Changes in v0.5:**
+
+- Renamed to **Coord** (was "Worktree Orchestrator" / `wto`).
+- Codex joins Claude Code in v1, through `codex app-server`, at full parity (permission prompts, steering, interrupts).
+- The PWA ships before the Expo mobile app. Electron stays the desktop app.
+- "Merge" means pushing the branch and opening a GitHub pull request.
+- Hosting uses subdomains of `shekharkumar.com` (`coord.shekharkumar.com`, `relay.coord.shekharkumar.com`). All URLs are configurable.
+- The Phase 1 design is being written up separately.
 
 **Changes in v0.4:**
 
@@ -178,7 +187,7 @@ Other agents, AI planning and triggers are P2.
 | FR-4  | Claude Code | Show permission requests to all connected clients for approve or deny, with a per-repo allowlist                                     | P0       |
 | FR-5  | Claude Code | Resume a session by ID for follow-ups after a run ends or the daemon restarts                                                        | P0       |
 | FR-6  | Claude Code | Ship an MCP server so Claude Code can create, list, check, message and merge tasks                                                   | P0       |
-| FR-7  | Claude Code | Ship a CLI (`wto`) that Claude Code or the user can call from any shell                                                              | P0       |
+| FR-7  | Claude Code | Ship a CLI (`coord`) that Claude Code or the user can call from any shell                                                            | P0       |
 | FR-8  | Claude Code | Choose model and permission mode per task                                                                                            | P1       |
 | FR-9  | Claude Code | Attach mode: track Claude Code sessions the user started by hand in a worktree, using Claude Code hooks (`Stop`, `Notification`)     | P1       |
 | FR-10 | Claude Code | Fallback adapter using `claude -p --output-format stream-json`, for when the SDK isn't available                                     | P2       |
@@ -249,9 +258,9 @@ The main path is the **Claude Agent SDK** (TypeScript, `@anthropic-ai/claude-age
 
 ### 7.2 Inbound: Claude Code drives the orchestrator
 
-- **MCP server (`wto-mcp`).** Tools: `create_task`, `list_tasks`, `get_task` (status, diff summary, test results), `send_message`, `merge_task`, `discard_task`. The user adds it once with `claude mcp add`. From then on, any Claude Code session can spread work across parallel tasks.
-- **CLI (`wto`).** The same operations as shell commands (`wto new "add dark mode"`, `wto ls`, `wto merge <id>`), so Claude Code can also use it through Bash, and so can scripts.
-- **Hooks (attach mode, P1).** An optional `.claude/settings.json` snippet whose `Stop` and `Notification` hooks call `wto hook …`. Sessions the user starts by hand still show up in the dashboard and on the phone.
+- **MCP server (`coord-mcp`).** Tools: `create_task`, `list_tasks`, `get_task` (status, diff summary, test results), `send_message`, `merge_task`, `discard_task`. The user adds it once with `claude mcp add`. From then on, any Claude Code session can spread work across parallel tasks.
+- **CLI (`coord`).** The same operations as shell commands (`coord new "add dark mode"`, `coord ls`, `coord merge <id>`), so Claude Code can also use it through Bash, and so can scripts.
+- **Hooks (attach mode, P1).** An optional `.claude/settings.json` snippet whose `Stop` and `Notification` hooks call `coord hook …`. Sessions the user starts by hand still show up in the dashboard and on the phone.
 
 ### 7.3 Adapter interface (agent-neutral core)
 
@@ -283,21 +292,21 @@ Rules:
 
 ## 8. Non-functional requirements
 
-| Area                | Requirement                                                                                                                                                                                                                                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Safety              | The default permission mode asks before running shell commands or editing files outside the worktree. Bypass mode needs per-repo opt-in on the desktop (never from the phone) and shows a visible warning.                                                                                                        |
-| Isolation           | An agent's `cwd` is its worktree. The setup script never writes outside the worktree.                                                                                                                                                                                                                             |
-| Local security      | The daemon requires a random per-start token on every request except `/health`. The token is stored in an owner-only file (`~/.wto/daemon-<port>.json`, mode 0600), so other OS users and local web pages can't control it. The daemon also rejects a non-local Host and any browser Origin outside an allowlist. |
-| Remote security     | Phones pair by QR code using a key exchange; each device has its own keys and can be revoked. Merge and other risky actions on the phone need biometric confirmation. The daemon never listens on a public port.                                                                                                  |
-| Relay privacy       | Messages between phone and daemon are encrypted so the relay can't read them (e.g. libsodium sealed boxes). The relay stores no code, diffs or prompts; only device IDs, push tokens and messages briefly queued while a device is offline.                                                                       |
-| Protocol versioning | Every message carries a protocol version. The daemon supports the current and previous minor version, because the phone app updates slower than the desktop.                                                                                                                                                      |
-| Persistence         | Tasks, session IDs, events and costs are stored in SQLite. They survive daemon restarts and crashes, and running tasks are marked "interrupted, resumable".                                                                                                                                                       |
-| Performance         | Up to 5 concurrent agents on a 16 GB laptop. Events reach the desktop UI within 500 ms and the phone within 2 s over the relay. Worktree creation, excluding dependency install, takes under 5 s.                                                                                                                 |
-| Availability        | Agents run only while the host machine is awake. The desktop app offers "keep awake while tasks run". The daemon can run with no window or screen (Mac mini, home server, later a cloud VM).                                                                                                                      |
-| Cost visibility     | Token use and cost are shown per task and per day, with an optional daily budget that pauses the queue.                                                                                                                                                                                                           |
-| Git hygiene         | Every orchestrator branch uses the `agent/` prefix. The app never force-pushes or touches branches it didn't create.                                                                                                                                                                                              |
-| Privacy             | No telemetry unless the user turns it on. API keys come from the user's existing Claude Code login or environment and never leave the desktop.                                                                                                                                                                    |
-| Platforms           | Desktop: macOS and Linux, git 2.40 or later (the repo pins Node 24 LTS for development). Mobile: iOS 16 or later, Android 10 or later. Web: current Safari, Chrome, Firefox and Edge.                                                                                                                             |
+| Area                | Requirement                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Safety              | The default permission mode asks before running shell commands or editing files outside the worktree. Bypass mode needs per-repo opt-in on the desktop (never from the phone) and shows a visible warning.                                                                                                          |
+| Isolation           | An agent's `cwd` is its worktree. The setup script never writes outside the worktree.                                                                                                                                                                                                                               |
+| Local security      | The daemon requires a random per-start token on every request except `/health`. The token is stored in an owner-only file (`~/.coord/daemon-<port>.json`, mode 0600), so other OS users and local web pages can't control it. The daemon also rejects a non-local Host and any browser Origin outside an allowlist. |
+| Remote security     | Phones pair by QR code using a key exchange; each device has its own keys and can be revoked. Merge and other risky actions on the phone need biometric confirmation. The daemon never listens on a public port.                                                                                                    |
+| Relay privacy       | Messages between phone and daemon are encrypted so the relay can't read them (e.g. libsodium sealed boxes). The relay stores no code, diffs or prompts; only device IDs, push tokens and messages briefly queued while a device is offline.                                                                         |
+| Protocol versioning | Every message carries a protocol version. The daemon supports the current and previous minor version, because the phone app updates slower than the desktop.                                                                                                                                                        |
+| Persistence         | Tasks, session IDs, events and costs are stored in SQLite. They survive daemon restarts and crashes, and running tasks are marked "interrupted, resumable".                                                                                                                                                         |
+| Performance         | Up to 5 concurrent agents on a 16 GB laptop. Events reach the desktop UI within 500 ms and the phone within 2 s over the relay. Worktree creation, excluding dependency install, takes under 5 s.                                                                                                                   |
+| Availability        | Agents run only while the host machine is awake. The desktop app offers "keep awake while tasks run". The daemon can run with no window or screen (Mac mini, home server, later a cloud VM).                                                                                                                        |
+| Cost visibility     | Token use and cost are shown per task and per day, with an optional daily budget that pauses the queue.                                                                                                                                                                                                             |
+| Git hygiene         | Every orchestrator branch uses the `agent/` prefix. The app never force-pushes or touches branches it didn't create.                                                                                                                                                                                                |
+| Privacy             | No telemetry unless the user turns it on. API keys come from the user's existing Claude Code login or environment and never leave the desktop.                                                                                                                                                                      |
+| Platforms           | Desktop: macOS and Linux, git 2.40 or later (the repo pins Node 24 LTS for development). Mobile: iOS 16 or later, Android 10 or later. Web: current Safari, Chrome, Firefox and Edge.                                                                                                                               |
 
 ---
 
@@ -316,11 +325,11 @@ The orchestrator core runs as a **separate background process** (the daemon). Th
 flowchart LR
     subgraph Desktop["User's machine"]
         EL[Electron app<br/>React UI + tray]
-        CLI[wto CLI]
+        CLI[coord CLI]
         CC[Claude Code session<br/>user's own]
-        subgraph Daemon["wto daemon (Node + TypeScript)"]
+        subgraph Daemon["coord daemon (Node + TypeScript)"]
             API[Local API<br/>HTTP + WebSocket on localhost]
-            MCP[wto-mcp server]
+            MCP[coord-mcp server]
             TM[Task manager<br/>queue, states, concurrency]
             WM[Worktree manager<br/>git worktree, setup, ports, cleanup]
             RV[Review service<br/>diff, tests, merge, gh PR]
@@ -363,14 +372,14 @@ flowchart LR
 The repo uses **pnpm workspaces + Nx** (package-based: each package keeps its own `package.json` scripts; Nx adds the project graph, caching, boundary rules and generators). `apps/` holds runnable programs and `packages/` holds libraries.
 
 ```
-wto/
+coord/
   apps/
-    desktop/              Electron shell: main starts the daemon + bridges IPC; renderer mounts @wto/ui-web
-    web/                  installable PWA (Vite + vite-plugin-pwa); mounts @wto/ui-web
+    desktop/              Electron shell: main starts the daemon + bridges IPC; renderer mounts @coord/ui-web
+    web/                  installable PWA (Vite + vite-plugin-pwa); mounts @coord/ui-web
     mobile/               Expo (React Native) app
     relay/                WebSocket relay + push (Node; can move to Cloudflare Workers + Durable Objects)
-    cli/                  the `wto` command
-    mcp-server/           wto-mcp, so Claude Code can drive the orchestrator
+    cli/                  the `coord` command
+    mcp-server/           coord-mcp, so Claude Code can drive the orchestrator
   packages/
     protocol/             zod schemas: tasks, agent events, pushed-event envelope, errors, protocol version
     client/               typed daemon client over a pluggable Transport (request + subscribe)
@@ -381,7 +390,7 @@ wto/
     adapter-claude-code/  Claude Agent SDK adapter (P0)
     tsconfig/             shared TypeScript configs
   tools/
-    workspace-plugin/     local Nx generators (`nx g @wto/workspace-plugin:library`) + repo invariants test
+    workspace-plugin/     local Nx generators (`nx g @coord/workspace-plugin:library`) + repo invariants test
 ```
 
 Daemon internals added in Phase 1 (worktree manager, SQLite store) are `type:service` packages: only the daemon may import them.
@@ -402,18 +411,18 @@ Daemon internals added in Phase 1 (worktree manager, SQLite store) are `type:ser
 - **Daemon (`packages/core`):** Node 20+, TypeScript, Fastify (HTTP + WebSocket), `better-sqlite3`, `execa` for git and `gh`.
 - **Claude Code:** `@anthropic-ai/claude-agent-sdk`. MCP server built with `@modelcontextprotocol/sdk`.
 - **Workspace:** Node 24 LTS (pinned through pnpm `use-node-version`), pnpm 10, Nx 24, TypeScript 6, ESLint 10 + typescript-eslint, Prettier, Vitest. CI runs `pnpm check` (every project) on GitHub Actions.
-- **Desktop (`apps/desktop`):** Electron + electron-vite. The window renders `@wto/ui-web`. For diffs, `react-diff-view` or Monaco's diff editor. Packaged with electron-builder.
-- **Web (`apps/web`):** Vite + React + `vite-plugin-pwa` (manifest, service worker), rendering `@wto/ui-web`.
+- **Desktop (`apps/desktop`):** Electron + electron-vite. The window renders `@coord/ui-web`. For diffs, `react-diff-view` or Monaco's diff editor. Packaged with electron-builder.
+- **Web (`apps/web`):** Vite + React + `vite-plugin-pwa` (manifest, service worker), rendering `@coord/ui-web`.
 - **Mobile (`apps/mobile`):** Expo (React Native) with Expo Router, Expo Notifications, expo-local-authentication (biometrics) and expo-camera (QR pairing).
 - **Relay (`apps/relay`):** Node + `ws` to start. It can move to Cloudflare Workers + Durable Objects later. Push goes through the Expo Push API.
 - **Crypto:** libsodium (`libsodium-wrappers` on desktop and relay, a React Native compatible build on mobile).
-- **Repo config:** `.wto/config.json` in each managed repo (setup script, test command, port range, env files to copy), committed so the team shares it.
+- **Repo config:** `.coord/config.json` in each managed repo (setup script, test command, port range, env files to copy), committed so the team shares it.
 
 ### 9.4 Remote access design (Phase 4)
 
 The UI and the data reach the phone by different paths.
 
-**The UI.** The PWA (`apps/web`) is served as static files over HTTPS by the project (e.g. `https://app.wto.dev`). It holds no user data and no server logic. It can't be served from the desktop for three reasons:
+**The UI.** The PWA (`apps/web`) is served as static files over HTTPS by the project (e.g. `https://app.coord.dev`). It holds no user data and no server logic. It can't be served from the desktop for three reasons:
 
 - Phones only install PWAs, run service workers and receive Web Push over HTTPS.
 - Away from home, the desktop is unreachable: the router blocks incoming connections, and the daemon binds to `127.0.0.1`.
@@ -422,18 +431,18 @@ The UI and the data reach the phone by different paths.
 **The data: an encrypted relay, paired by QR code.**
 
 ```
-Phone (PWA from app.wto.dev) ──wss──▶ Relay (ciphertext only) ◀──wss (outbound)── Desktop daemon
+Phone (PWA from app.coord.dev) ──wss──▶ Relay (ciphertext only) ◀──wss (outbound)── Desktop daemon
            ◀════════════ end-to-end encrypted (X25519 + XChaCha20-Poly1305, libsodium) ════════════▶
 ```
 
-1. **QR code.** "Connect phone" on the desktop shows a QR code for `https://app.wto.dev/pair#relay=…&room=…&key=<desktop public key>&secret=<one-time code>`. The `#` fragment is never sent to a server.
+1. **QR code.** "Connect phone" on the desktop shows a QR code for `https://app.coord.dev/pair#relay=…&room=…&key=<desktop public key>&secret=<one-time code>`. The `#` fragment is never sent to a server.
 2. **Handshake.** The phone generates a keypair. The two sides run a handshake through the relay, authenticated by the one-time secret the relay never sees, and derive a shared session key.
 3. **Encrypted traffic.** Every request and pushed event is encrypted on one device and decrypted only on the other.
    - The relay forwards bytes it can't read.
    - The daemon only connects outward, so no ports are opened on the user's network.
 4. **Reconnects.** The phone keeps its keys and reconnects automatically. A reconnecting client asks for missed events by `seq`. The desktop lists paired devices and can revoke each one (FR-32).
 
-`@wto/client` gets a relay `Transport`; the apps don't change. The native Expo app uses the same pairing and relay.
+`@coord/client` gets a relay `Transport`; the apps don't change. The native Expo app uses the same pairing and relay.
 
 **Relay hosting (open source).**
 
@@ -469,7 +478,7 @@ flowchart LR
     P0["Phase 0 · 1 week<br/>Skeleton hardening:<br/>all apps + packages lint,<br/>typecheck, test, build, CI;<br/>boundaries + generator;<br/>dogfood 3 Claude Code sessions"] --> G0{Gate: skeleton green<br/>on CI, reviewed,<br/>top pains confirmed}
     G0 --> P1["Phase 1 · 2 weeks<br/>protocol + core +<br/>Claude Code adapter + CLI,<br/>SQLite, worktree manager"]
     P1 --> G1{Gate: one task<br/>end-to-end from CLI,<br/>repo's CLAUDE.md honored}
-    G1 --> P2["Phase 2 · 2 weeks<br/>wto-mcp server +<br/>Electron app: live events,<br/>permissions, 3 parallel tasks"]
+    G1 --> P2["Phase 2 · 2 weeks<br/>coord-mcp server +<br/>Electron app: live events,<br/>permissions, 3 parallel tasks"]
     P2 --> G2{Gate: Claude Code<br/>spawns tasks via MCP}
     G2 --> P3["Phase 3 · 2 weeks<br/>Review loop: diff, tests,<br/>merge / PR, cleanup,<br/>overlap warnings, tray"]
     P3 --> G3{Gate: 1 week of<br/>daily desktop use}
@@ -512,14 +521,16 @@ The durations are estimates for one developer working part-time. Each gate must 
 - Repo: one pnpm + Nx monorepo.
 - Process model: a separate daemon process.
 - Audience: fully open source. The project hosts the static PWA; the remote-access design is in §9.4.
+- Name: **Coord**. Hosted at `coord.shekharkumar.com`; the relay at `relay.coord.shekharkumar.com`.
+- Agents in v1: Claude Code and Codex. Clients in v1: Electron desktop and the PWA; Expo follows.
+- Merge: open a GitHub pull request.
 
 **Still open:**
 
-- [ ] **Product name.** "Worktree Orchestrator" / `wto` is a placeholder. Settle it before publishing the repo and the web domain.
 - [ ] **License.** MIT or Apache-2.0?
 - [ ] **Public relay.** Does the project run a default public relay (proposed: Cloudflare Workers), or is the relay self-host only?
 - [ ] **Merge default.** Squash-merge locally, or always open a PR?
-- [ ] **Worktree location.** Next to the repo (`../repo-agent-<slug>`) or under `~/.wto/worktrees/<repo>/<slug>`?
+- [ ] **Worktree location.** Next to the repo (`../repo-agent-<slug>`) or under `~/.coord/worktrees/<repo>/<slug>`?
 - [ ] **Auth.** Is reusing the user's Claude Code login enough, or do we also support an API key per repo?
 - [ ] **Competitor check.** In Phase 0, verify the current features of Conductor, Crystal, Claude Squad, Vibe Kanban and Claude Code Remote Control.
 - [ ] **Second agent.** Which non-Claude agent comes first in Phase 6: Codex CLI or Gemini CLI?
@@ -532,9 +543,9 @@ The skeleton reviews raised these. Each belongs to a feature phase, so it is tra
 | ------------------------------------------------------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------- |
 | Cost accounting from the SDK's `modelUsage` (includes subagents and cache tokens) instead of the main-loop `usage` | 1                    | The adapter currently reports main-loop tokens only             |
 | Subagent events (`parent_tool_use_id`) nested under their parent tool call                                         | 1                    | Today they show up as top-level text and tool events            |
-| `RepoConfig` schema for `.wto/config.json` and a daemon data directory for SQLite                                  | 1                    | Needed by the worktree manager and store                        |
+| `RepoConfig` schema for `.coord/config.json` and a daemon data directory for SQLite                                | 1                    | Needed by the worktree manager and store                        |
 | Replay of missed events after reconnect (`/events?since=<seq>`)                                                    | 2 / 4                | The `seq` field is already in the envelope                      |
 | Bundled daemon for the packaged desktop app                                                                        | 2                    | Dev spawns it through pnpm; packaged builds throw a clear error |
-| Per-worktree daemon port allocation                                                                                | 2                    | `WTO_PORT` supports it manually today                           |
+| Per-worktree daemon port allocation                                                                                | 2                    | `COORD_PORT` supports it manually today                         |
 | Whether Electron main may import `platform:node` packages (shared daemon locator)                                  | 2                    | Today `platform:electron` allows only dom/react/any             |
 | CI with `nx affected` and remote cache                                                                             | When CI time matters | CI currently runs every check on every push                     |

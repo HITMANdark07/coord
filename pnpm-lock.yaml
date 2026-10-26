@@ -65,10 +65,10 @@ importers:
 
   apps/cli:
     dependencies:
-      '@wto/client':
+      '@coord/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@wto/local-daemon':
+      '@coord/local-daemon':
         specifier: workspace:*
         version: link:../../packages/local-daemon
       commander:
@@ -78,18 +78,36 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   apps/desktop:
     devDependencies:
+      '@coord/app-state':
+        specifier: workspace:*
+        version: link:../../packages/app-state
+      '@coord/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@coord/local-daemon':
+        specifier: workspace:*
+        version: link:../../packages/local-daemon
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@coord/ui-web':
+        specifier: workspace:*
+        version: link:../../packages/ui-web
       '@types/node':
         specifier: ^24
         version: 24.19.2
@@ -102,24 +120,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.1.2
         version: 6.1.2(babel-plugin-react-compiler@1.0.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      '@wto/app-state':
-        specifier: workspace:*
-        version: link:../../packages/app-state
-      '@wto/client':
-        specifier: workspace:*
-        version: link:../../packages/client
-      '@wto/local-daemon':
-        specifier: workspace:*
-        version: link:../../packages/local-daemon
-      '@wto/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
-      '@wto/ui-web':
-        specifier: workspace:*
-        version: link:../../packages/ui-web
       electron:
         specifier: 45.0.0
         version: 45.0.0
@@ -141,15 +141,15 @@ importers:
 
   apps/mcp-server:
     dependencies:
+      '@coord/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@coord/local-daemon':
+        specifier: workspace:*
+        version: link:../../packages/local-daemon
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
-      '@wto/client':
-        specifier: workspace:*
-        version: link:../../packages/client
-      '@wto/local-daemon':
-        specifier: workspace:*
-        version: link:../../packages/local-daemon
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -157,22 +157,22 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   apps/mobile:
     dependencies:
-      '@wto/design-tokens':
+      '@coord/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       expo:
@@ -216,28 +216,28 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
       '@types/ws':
         specifier: 8.18.2
         version: 8.18.2
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   apps/web:
     dependencies:
-      '@wto/app-state':
+      '@coord/app-state':
         specifier: workspace:*
         version: link:../../packages/app-state
-      '@wto/client':
+      '@coord/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@wto/ui-web':
+      '@coord/ui-web':
         specifier: workspace:*
         version: link:../../packages/ui-web
       react:
@@ -247,6 +247,9 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
@@ -259,9 +262,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.1.2
         version: 6.1.2(babel-plugin-react-compiler@1.0.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       jsdom:
         specifier: 30.1.3
         version: 30.1.3
@@ -286,32 +286,35 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.310
         version: 0.3.310(@anthropic-ai/sdk@1.3.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.2(zod@4.6.7))(zod@4.6.7)
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   packages/app-state:
     dependencies:
-      '@wto/client':
+      '@coord/client':
         specifier: workspace:*
         version: link:../client
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@testing-library/dom':
         specifier: 10.4.2
         version: 10.4.2
@@ -324,9 +327,6 @@ importers:
       '@types/react-dom':
         specifier: ~19.3.0
         version: 19.3.0(@types/react@19.3.0)
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
       jsdom:
         specifier: 30.1.3
         version: 30.1.3
@@ -342,14 +342,14 @@ importers:
 
   packages/client:
     dependencies:
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@wto/tsconfig':
+      '@coord/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -358,15 +358,15 @@ importers:
 
   packages/core:
     dependencies:
+      '@coord/local-daemon':
+        specifier: workspace:*
+        version: link:../local-daemon
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@fastify/websocket':
         specifier: 11.3.4
         version: 11.3.4
-      '@wto/local-daemon':
-        specifier: workspace:*
-        version: link:../local-daemon
-      '@wto/protocol':
-        specifier: workspace:*
-        version: link:../protocol
       fastify:
         specifier: 5.12.7
         version: 5.12.7
@@ -377,26 +377,26 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@coord/client':
+        specifier: workspace:*
+        version: link:../client
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      '@wto/client':
-        specifier: workspace:*
-        version: link:../client
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   packages/design-tokens:
     dependencies:
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
-      '@wto/tsconfig':
+      '@coord/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -405,22 +405,22 @@ importers:
 
   packages/local-daemon:
     dependencies:
-      '@wto/client':
+      '@coord/client':
         specifier: workspace:*
         version: link:../client
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
       zod:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -431,7 +431,7 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@wto/tsconfig':
+      '@coord/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -442,16 +442,22 @@ importers:
 
   packages/ui-web:
     dependencies:
-      '@wto/app-state':
+      '@coord/app-state':
         specifier: workspace:*
         version: link:../app-state
-      '@wto/design-tokens':
+      '@coord/design-tokens':
         specifier: workspace:*
         version: link:../design-tokens
-      '@wto/protocol':
+      '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
+      '@coord/client':
+        specifier: workspace:*
+        version: link:../client
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@testing-library/dom':
         specifier: 10.4.2
         version: 10.4.2
@@ -464,12 +470,6 @@ importers:
       '@types/react-dom':
         specifier: ~19.3.0
         version: 19.3.0(@types/react@19.3.0)
-      '@wto/client':
-        specifier: workspace:*
-        version: link:../client
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
       jsdom:
         specifier: 30.1.3
         version: 30.1.3
@@ -485,12 +485,12 @@ importers:
 
   tools/workspace-plugin:
     devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@nx/devkit':
         specifier: 24.0.1
         version: 24.0.1(nx@24.0.1(@swc-node/register@1.12.1(@swc/core@1.16.20)(@swc/types@0.1.28)(typescript@6.0.3))(@swc/core@1.16.20))
-      '@wto/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       nx:
         specifier: 24.0.1
         version: 24.0.1(@swc-node/register@1.12.1(@swc/core@1.16.20)(@swc/types@0.1.28)(typescript@6.0.3))(@swc/core@1.16.20)

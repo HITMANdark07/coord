@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DaemonError } from "@wto/client";
+import { DaemonError } from "@coord/client";
 import { fromIpcReply, isDaemonRequest, toIpcReply } from "./ipc";
 
 describe("isDaemonRequest", () => {

@@ -1,5 +1,5 @@
-import { createClient } from "@wto/client";
-import { daemonPort, localTransport, readDaemonInfo } from "@wto/local-daemon";
+import { createClient } from "@coord/client";
+import { daemonPort, localTransport, readDaemonInfo } from "@coord/local-daemon";
 import { buildProgram } from "./program";
 
 const client = createClient(localTransport());

@@ -1,4 +1,4 @@
-export { createClient, type DaemonEventListener, type WtoClient } from "./client";
+export { createClient, type DaemonEventListener, type CoordClient } from "./client";
 export {
   DaemonError,
   DEFAULT_DAEMON_URL,

@@ -1,4 +1,4 @@
-# Worktree Orchestrator — agent instructions
+# Coord — agent instructions
 
 An app that runs coding agents (Claude Code first) in parallel git worktrees, controlled from a desktop app, a mobile app and an installable web app. Product spec: [docs/PRD.md](docs/PRD.md). Read the relevant PRD section before building a feature.
 
@@ -6,34 +6,34 @@ An app that runs coding agents (Claude Code first) in parallel git worktrees, co
 
 Run all commands from the repo root. pnpm runs scripts with the Node version pinned in `.npmrc` (24 LTS), whatever your system Node is.
 
-| Task                                        | Command                                                                                                                            |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Install (also after `git worktree add`)     | `pnpm install`                                                                                                                     |
-| **Definition of done**                      | `pnpm check`: lint, typecheck, test and build for every project, a format check, and the neatcode rules (`pnpm conventions`)       |
-| One project                                 | `pnpm exec nx run-many -t lint typecheck test build -p @wto/<name>`                                                                |
-| Format                                      | `pnpm format`                                                                                                                      |
-| New library package                         | `pnpm exec nx g @wto/workspace-plugin:library <name> --type=<lib\|state\|ui\|adapter\|service> --platform=<any\|node\|react\|dom>` |
-| Project graph                               | `pnpm graph`                                                                                                                       |
-| Run daemon / desktop / web / mobile / relay | `pnpm daemon`, `pnpm desktop`, `pnpm web`, `pnpm mobile`, `pnpm relay`                                                             |
-| Daemon and desktop with watch mode          | `pnpm dev`                                                                                                                         |
-| CLI                                         | `pnpm wto status`, `pnpm wto ls`, `pnpm wto new "<prompt>"`, `pnpm wto web` (link that opens the web app connected to the daemon)  |
+| Task                                        | Command                                                                                                                                   |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Install (also after `git worktree add`)     | `pnpm install`                                                                                                                            |
+| **Definition of done**                      | `pnpm check`: lint, typecheck, test and build for every project, a format check, and the neatcode rules (`pnpm conventions`)              |
+| One project                                 | `pnpm exec nx run-many -t lint typecheck test build -p @coord/<name>`                                                                     |
+| Format                                      | `pnpm format`                                                                                                                             |
+| New library package                         | `pnpm exec nx g @coord/workspace-plugin:library <name> --type=<lib\|state\|ui\|adapter\|service> --platform=<any\|node\|react\|dom>`      |
+| Project graph                               | `pnpm graph`                                                                                                                              |
+| Run daemon / desktop / web / mobile / relay | `pnpm daemon`, `pnpm desktop`, `pnpm web`, `pnpm mobile`, `pnpm relay`                                                                    |
+| Daemon and desktop with watch mode          | `pnpm dev`                                                                                                                                |
+| CLI                                         | `pnpm coord status`, `pnpm coord ls`, `pnpm coord new "<prompt>"`, `pnpm coord web` (link that opens the web app connected to the daemon) |
 
 A task is not done until `pnpm check` passes. Don't skip, weaken or delete a check to make it pass.
 
 **Never bypass the git hooks.** Don't use `git commit --no-verify`, `git push --no-verify` or `SKIP_SIMPLE_GIT_HOOKS`. If a hook fails because a worktree has no `node_modules`, run `pnpm install` there. Every git worktree of this repo needs its own `pnpm install`.
 
-**Running more than one daemon** (e.g. one per worktree): set `WTO_PORT`. The daemon, CLI, MCP server, desktop app and web dev proxy all read it; the default is 4545. `WTO_HOME` (default `~/.wto`) is where the daemon writes its token file, `daemon-<port>.json`.
+**Running more than one daemon** (e.g. one per worktree): set `COORD_PORT`. The daemon, CLI, MCP server, desktop app and web dev proxy all read it; the default is 4545. `COORD_HOME` (default `~/.coord`) is where the daemon writes its token file, `daemon-<port>.json`.
 
 ## Layout
 
 `apps/` holds runnable programs (`type:app`) and `packages/` holds libraries. The invariants test enforces this.
 
 ```
-apps/desktop        Electron shell. Main starts the daemon and bridges IPC; renderer mounts @wto/ui-web
-apps/web            Installable PWA (Vite + vite-plugin-pwa); mounts @wto/ui-web
+apps/desktop        Electron shell. Main starts the daemon and bridges IPC; renderer mounts @coord/ui-web
+apps/web            Installable PWA (Vite + vite-plugin-pwa); mounts @coord/ui-web
 apps/mobile         Expo React Native app (see apps/mobile/AGENTS.md for Expo rules)
 apps/relay          WebSocket relay between the daemon and remote clients
-apps/cli            the `wto` command
+apps/cli            the `coord` command
 apps/mcp-server     MCP server so Claude Code can drive the orchestrator
 packages/protocol   zod schemas and types: the contract between every part
 packages/client     typed daemon client over a pluggable Transport (request + subscribe)
@@ -102,14 +102,14 @@ Every project's `package.json` has `nx.tags` with exactly one `type:` and one `p
 
 The list of packages comes from the tags, so new packages are covered automatically.
 
-If lint blocks an import, the design is wrong. Move the code to the right package, or go through `@wto/client`. Don't loosen the rules or add `eslint-disable` to get past them.
+If lint blocks an import, the design is wrong. Move the code to the right package, or go through `@coord/client`. Don't loosen the rules or add `eslint-disable` to get past them.
 
 ## Architecture rules
 
 1. **Everything goes through `protocol`.**
-   - Apps reach the daemon only through `@wto/client`.
+   - Apps reach the daemon only through `@coord/client`.
    - Request, response, event and error shapes are zod schemas in `packages/protocol`, and `client` validates every response and pushed event.
-   - Every request carries `PROTOCOL_VERSION` (header `x-wto-protocol`; `?protocol=` on the WebSocket). The daemon accepts the same major version with the current or previous minor, and answers 426 otherwise.
+   - Every request carries `PROTOCOL_VERSION` (header `x-coord-protocol`; `?protocol=` on the WebSocket). The daemon accepts the same major version with the current or previous minor, and answers 426 otherwise.
 2. **Change the protocol without breaking phones,** which update days after the desktop.
    - **Additive changes need no version bump.** New optional fields, new event kinds, new statuses, new routes.
    - **Old clients must tolerate additions.** Unknown enum values parse to a fallback, e.g. `ReadTaskStatus` turns an unknown status into `"unknown"`. Unknown events are dropped.
@@ -120,7 +120,7 @@ If lint blocks an import, the design is wrong. Move the code to the right packag
    - A client opens one event connection, shared by every subscriber.
    - UIs use `useLiveQuery` / `useTasks`: at most one load in flight, a reload on matching events and on reconnect, and polling only as a fallback.
 5. **The daemon is a separate process.**
-   - Apps never import `@wto/core`. Desktop spawns the daemon (an Nx `implicitDependencies` entry records this), and closing the window must not stop it.
+   - Apps never import `@coord/core`. Desktop spawns the daemon (an Nx `implicitDependencies` entry records this), and closing the window must not stop it.
    - Only `packages/core/src/main.ts` wires adapters and services together.
 6. **Share screens only between React DOM apps.**
    - Desktop and web share `ui-web`. Mobile has its own screens but reuses `app-state`, `client`, `protocol` and `design-tokens`.
@@ -134,11 +134,11 @@ If lint blocks an import, the design is wrong. Move the code to the right packag
    - Never cut a Claude Code feature to fit a weaker agent; other agents declare what they can't do in `capabilities`.
    - A CLI fallback for Claude Code (PRD FR-10) belongs inside `adapter-claude-code`, which reuses `toAgentEvents`.
 8. **Security defaults.**
-   - **Daemon.** It listens on `127.0.0.1` and rejects a non-local Host (DNS rebinding) and any browser Origin not in its allowlist (`DEFAULT_ALLOWED_ORIGINS`, or `WTO_ALLOWED_ORIGINS`).
-   - **Token.** Every route except `/health` needs the daemon's token. It's random per start and stored in `<WTO_HOME>/daemon-<port>.json`, mode 0600.
-     - Node clients use `localTransport()` from `@wto/local-daemon`.
+   - **Daemon.** It listens on `127.0.0.1` and rejects a non-local Host (DNS rebinding) and any browser Origin not in its allowlist (`DEFAULT_ALLOWED_ORIGINS`, or `COORD_ALLOWED_ORIGINS`).
+   - **Token.** Every route except `/health` needs the daemon's token. It's random per start and stored in `<COORD_HOME>/daemon-<port>.json`, mode 0600.
+     - Node clients use `localTransport()` from `@coord/local-daemon`.
      - The web dev proxy only forwards; it never adds the token. Otherwise any local process could use the proxy.
-     - Browsers get the token from the link `pnpm wto web` prints. It arrives in the URL fragment, is kept in `sessionStorage` for that tab, and is sent as a bearer header, or as a subprotocol on the WebSocket.
+     - Browsers get the token from the link `pnpm coord web` prints. It arrives in the URL fragment, is kept in `sessionStorage` for that tab, and is sent as a bearer header, or as a subprotocol on the WebSocket.
    - **Electron.** The renderer has no Node access (`sandbox`, `contextIsolation`). Its only channel is the IPC bridge, and the main process checks every request with `isDaemonRequest`.
    - **Relay.** It binds to localhost unless `RELAY_HOST` is set, and caps payload size, peers per room and total connections. Remote clients go through it, encrypted end to end (Phase 4).
 
@@ -148,7 +148,7 @@ If lint blocks an import, the design is wrong. Move the code to the right packag
 - **New library packages come from the generator,** never by copying a folder. New apps are rare: copy the nearest app and keep its scripts and tags.
 - **Tests sit next to the code** as `*.test.ts(x)`.
   - Vitest everywhere, except `apps/mobile`, which uses `jest-expo` and React Native Testing Library.
-  - Use `fakeTransport` from `@wto/client/testing` with `createClient()` instead of hand-written fake clients.
+  - Use `fakeTransport` from `@coord/client/testing` with `createClient()` instead of hand-written fake clients.
   - Each change adds or updates tests; a bug fix adds a test that fails without the fix. Check that a new test fails when you break the code it guards.
   - Wait on real signals (connection `onStatus`, `waitFor`), not fixed sleeps.
 - **Validate untrusted input:** HTTP bodies, IPC messages and relay frames with zod schemas. The IPC request shape uses the stricter `isDaemonRequest` check.
@@ -162,4 +162,4 @@ If lint blocks an import, the design is wrong. Move the code to the right packag
   - Native modules (e.g. `better-sqlite3`) must be listed in `onlyBuiltDependencies` in `pnpm-workspace.yaml`, or pnpm skips their build.
 - **Declare build-time environment variables** (e.g. `VITE_*`, `EXPO_PUBLIC_*`) in that project's Nx `inputs` (`{ "env": "NAME" }`), or Nx may serve a stale cached build.
 - **Never edit by hand:** `pnpm-lock.yaml`, `apps/mobile/ios`, `apps/mobile/android`, build output (`dist`, `out`).
-- **Never commit secrets.** `.env` files are git-ignored. Never log or print the daemon token. The `wto web` link is the one deliberate exception.
+- **Never commit secrets.** `.env` files are git-ignored. Never log or print the daemon token. The `coord web` link is the one deliberate exception.

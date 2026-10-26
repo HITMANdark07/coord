@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import { createClient, type WtoClient } from "@wto/client";
-import { fakeTransport } from "@wto/client/testing";
-import type { Task } from "@wto/protocol";
+import { createClient, type CoordClient } from "@coord/client";
+import { fakeTransport } from "@coord/client/testing";
+import type { Task } from "@coord/protocol";
 import { ClientProvider, useDaemonStatus, useTasks } from "./index";
 
 const health = { ok: true, protocolVersion: "0.1.0", daemonVersion: "0.1.0" };
@@ -21,7 +21,7 @@ const task: Task = {
   createdAt: "2026-10-26T00:00:00.000Z",
 };
 
-function wrapperFor(client: WtoClient) {
+function wrapperFor(client: CoordClient) {
   return ({ children }: { children: ReactNode }) => (
     <ClientProvider client={client}>{children}</ClientProvider>
   );

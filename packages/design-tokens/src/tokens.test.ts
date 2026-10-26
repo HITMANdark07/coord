@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TaskStatus } from "@wto/protocol";
+import { TaskStatus } from "@coord/protocol";
 import { colors, statusColors } from "./index";
 
 describe("design tokens", () => {

@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createClient, DaemonError, httpTransport, type WtoClient } from "@wto/client";
+import { createClient, DaemonError, httpTransport, type CoordClient } from "@coord/client";
 import {
   EVENTS_SUBPROTOCOL,
   PROTOCOL_HEADER,
@@ -8,7 +8,7 @@ import {
   Task,
   TOKEN_SUBPROTOCOL_PREFIX,
   type DaemonEvent,
-} from "@wto/protocol";
+} from "@coord/protocol";
 import { createServer } from "./server";
 
 const TOKEN = "test-token-0123456789-0123456789-abcdef";
@@ -113,7 +113,7 @@ describe("daemon API", () => {
 describe("daemon over a real socket", () => {
   let app: ReturnType<typeof createServer>;
   let baseUrl: string;
-  let client: WtoClient;
+  let client: CoordClient;
   beforeEach(async () => {
     app = createServer({ token: TOKEN });
     await app.listen({ host: "127.0.0.1", port: 0 });

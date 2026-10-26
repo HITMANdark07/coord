@@ -1,5 +1,5 @@
 {
-  "name": "@wto/web",
+  "name": "@coord/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@wto/app-state": "workspace:*",
-    "@wto/client": "workspace:*",
-    "@wto/ui-web": "workspace:*",
+    "@coord/app-state": "workspace:*",
+    "@coord/client": "workspace:*",
+    "@coord/ui-web": "workspace:*",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -23,7 +23,7 @@
     "@types/react": "~19.3.0",
     "@types/react-dom": "~19.3.0",
     "@vitejs/plugin-react": "6.1.2",
-    "@wto/tsconfig": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "jsdom": "30.1.3",
     "typescript": "~6.0.3",
     "vite": "8.3.5",

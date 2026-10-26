@@ -1,5 +1,5 @@
 {
-  "extends": "@wto/tsconfig/node.json",
+  "extends": "@coord/tsconfig/node.json",
   "compilerOptions": {
     // Nx 24 runs this plugin with Node's native TypeScript stripping: ESM with explicit .ts imports.
     "module": "NodeNext",

@@ -1,5 +1,5 @@
 {
-  "name": "wto",
+  "name": "coord",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "prepare": "simple-git-hooks",
-    "dev": "WTO_EXTERNAL_DAEMON=1 nx run-many -t dev -p @wto/core @wto/desktop",
+    "dev": "COORD_EXTERNAL_DAEMON=1 nx run-many -t dev -p @coord/core @coord/desktop",
     "build": "nx run-many -t build",
     "typecheck": "nx run-many -t typecheck",
     "lint": "nx run-many -t lint",
@@ -17,12 +17,12 @@
     "format": "nx format:write --all",
     "format:check": "nx format:check --all",
     "graph": "nx graph",
-    "daemon": "pnpm --filter @wto/core start",
-    "desktop": "pnpm --filter @wto/desktop dev",
-    "web": "pnpm --filter @wto/web dev",
-    "mobile": "pnpm --filter @wto/mobile start",
-    "relay": "pnpm --filter @wto/relay start",
-    "wto": "pnpm --silent --filter @wto/cli wto",
+    "daemon": "pnpm --filter @coord/core start",
+    "desktop": "pnpm --filter @coord/desktop dev",
+    "web": "pnpm --filter @coord/web dev",
+    "mobile": "pnpm --filter @coord/mobile start",
+    "relay": "pnpm --filter @coord/relay start",
+    "coord": "pnpm --silent --filter @coord/cli coord",
     "conventions": "node tools/neatcode-check.mjs"
   },
   "simple-git-hooks": {

@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ClientProvider } from "@wto/app-state";
-import { createClient } from "@wto/client";
-import { fakeTransport } from "@wto/client/testing";
+import { ClientProvider } from "@coord/app-state";
+import { createClient } from "@coord/client";
+import { fakeTransport } from "@coord/client/testing";
 import { App } from "./app";
 
 const transport = fakeTransport((req) =>

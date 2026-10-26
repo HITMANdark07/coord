@@ -1,5 +1,5 @@
 {
-  "name": "@wto/ui-web",
+  "name": "@coord/ui-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@wto/app-state": "workspace:*",
-    "@wto/design-tokens": "workspace:*",
-    "@wto/protocol": "workspace:*"
+    "@coord/app-state": "workspace:*",
+    "@coord/design-tokens": "workspace:*",
+    "@coord/protocol": "workspace:*"
   },
   "peerDependencies": {
     "react": "19.3.0",
@@ -25,8 +25,8 @@
     "@testing-library/react": "16.3.3",
     "@types/react": "~19.3.0",
     "@types/react-dom": "~19.3.0",
-    "@wto/client": "workspace:*",
-    "@wto/tsconfig": "workspace:*",
+    "@coord/client": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
     "jsdom": "30.1.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

@@ -5,7 +5,7 @@ import {
   type SDKUserMessage,
   type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentAdapter, AgentEvent, AgentRun, RunContext } from "@wto/protocol";
+import type { AgentAdapter, AgentEvent, AgentRun, RunContext } from "@coord/protocol";
 import { toAgentEvents } from "./events";
 import { createMessageQueue } from "./message-queue";
 

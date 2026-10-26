@@ -1,6 +1,6 @@
-# Worktree Orchestrator (`wto`)
+# Coord
 
-Run several coding agents (Claude Code first) in parallel git worktrees on one repo, and steer them from your desktop, your phone, or an installed web app.
+Run coding agents (Claude Code and Codex) in parallel git worktrees on one repo, and steer them from your desktop or your phone. Open source, local-first, no account.
 
 - Product spec: [docs/PRD.md](docs/PRD.md)
 - Rules for contributors and coding agents: [AGENTS.md](AGENTS.md)
@@ -20,20 +20,20 @@ pnpm install
 pnpm check            # lint, typecheck, test, build every project
 
 pnpm daemon           # start the daemon on http://127.0.0.1:4545
-pnpm wto status       # in another terminal
-pnpm wto new "Add dark mode"
-pnpm wto ls
+pnpm coord status       # in another terminal
+pnpm coord new "Add dark mode"
+pnpm coord ls
 
 pnpm desktop          # Electron app (starts the daemon if it isn't running)
 pnpm web              # PWA dev server on http://localhost:5173 (proxies /api to the daemon)
-pnpm wto web          # prints the link that opens the web app with the daemon's token
+pnpm coord web          # prints the link that opens the web app with the daemon's token
 pnpm mobile           # Expo dev server
 ```
 
 Use from Claude Code:
 
 ```sh
-claude mcp add wto -- pnpm --dir "$PWD/apps/mcp-server" --silent start
+claude mcp add coord -- pnpm --dir "$PWD/apps/mcp-server" --silent start
 ```
 
 ## Workspace

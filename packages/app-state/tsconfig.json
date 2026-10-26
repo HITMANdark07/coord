@@ -1,4 +1,4 @@
 {
-  "extends": "@wto/tsconfig/react.json",
+  "extends": "@coord/tsconfig/react.json",
   "include": ["src", "vitest.config.ts"]
 }

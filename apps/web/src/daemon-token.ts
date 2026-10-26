@@ -1,7 +1,7 @@
-const STORAGE_KEY = "wto.daemonToken";
+const STORAGE_KEY = "coord.daemonToken";
 
 /**
- * The daemon token arrives in the URL fragment of the link `pnpm wto web` prints
+ * The daemon token arrives in the URL fragment of the link `pnpm coord web` prints
  * (`…/#token=…`). Fragments are never sent to a server. It is kept for this browser tab only,
  * and removed from the address bar so it doesn't end up in history or screenshots.
  */

@@ -1,5 +1,5 @@
 {
-  "name": "@wto/mobile",
+  "name": "@coord/mobile",
   "version": "0.1.0",
   "private": true,
   "main": "index.ts",
@@ -13,8 +13,8 @@
     "test": "jest"
   },
   "dependencies": {
-    "@wto/design-tokens": "workspace:*",
-    "@wto/protocol": "workspace:*",
+    "@coord/design-tokens": "workspace:*",
+    "@coord/protocol": "workspace:*",
     "expo": "~58.0.19",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",

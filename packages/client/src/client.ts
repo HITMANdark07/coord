@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CreateTaskInput, DaemonEvent, Health, Task } from "@wto/protocol";
+import { CreateTaskInput, DaemonEvent, Health, Task } from "@coord/protocol";
 import { httpTransport, type ConnectionStatus, type Transport } from "./transport";
 
 export interface DaemonEventListener {
@@ -56,4 +56,4 @@ export function createClient(transport: Transport = httpTransport()) {
   };
 }
 
-export type WtoClient = ReturnType<typeof createClient>;
+export type CoordClient = ReturnType<typeof createClient>;

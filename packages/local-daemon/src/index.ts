@@ -9,12 +9,12 @@ import {
   localDaemonUrl,
   type HttpTransportOptions,
   type Transport,
-} from "@wto/client";
-import { DEFAULT_DAEMON_PORT } from "@wto/protocol";
+} from "@coord/client";
+import { DEFAULT_DAEMON_PORT } from "@coord/protocol";
 
 /**
  * How Node clients on this machine find and authenticate to the daemon. The daemon writes
- * `<WTO_HOME>/daemon-<port>.json` (mode 0600) with a random token; only the same OS user can read it.
+ * `<COORD_HOME>/daemon-<port>.json` (mode 0600) with a random token; only the same OS user can read it.
  */
 export const DaemonInfo = z.object({
   port: z.number().int(),
@@ -24,14 +24,15 @@ export const DaemonInfo = z.object({
 });
 export type DaemonInfo = z.infer<typeof DaemonInfo>;
 
-export const wtoHome = (env: NodeJS.ProcessEnv = process.env) => env.WTO_HOME ?? join(homedir(), ".wto");
+export const coordHome = (env: NodeJS.ProcessEnv = process.env) =>
+  env.COORD_HOME ?? join(homedir(), ".coord");
 export const daemonPort = (env: NodeJS.ProcessEnv = process.env) =>
-  Number(env.WTO_PORT ?? DEFAULT_DAEMON_PORT);
-export const daemonInfoPath = (port: number, home = wtoHome()) => join(home, `daemon-${port}.json`);
+  Number(env.COORD_PORT ?? DEFAULT_DAEMON_PORT);
+export const daemonInfoPath = (port: number, home = coordHome()) => join(home, `daemon-${port}.json`);
 
 export const createToken = () => randomBytes(32).toString("base64url");
 
-export async function writeDaemonInfo(info: DaemonInfo, home = wtoHome()): Promise<string> {
+export async function writeDaemonInfo(info: DaemonInfo, home = coordHome()): Promise<string> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const path = daemonInfoPath(info.port, home);
   await writeFile(path, JSON.stringify(info), { mode: 0o600 });
@@ -39,7 +40,7 @@ export async function writeDaemonInfo(info: DaemonInfo, home = wtoHome()): Promi
   return path;
 }
 
-export async function readDaemonInfo(port: number, home = wtoHome()): Promise<DaemonInfo | undefined> {
+export async function readDaemonInfo(port: number, home = coordHome()): Promise<DaemonInfo | undefined> {
   try {
     return DaemonInfo.parse(JSON.parse(await readFile(daemonInfoPath(port, home), "utf8")));
   } catch {
@@ -48,7 +49,7 @@ export async function readDaemonInfo(port: number, home = wtoHome()): Promise<Da
 }
 
 /** Removes the info file, but only if it still belongs to this process (another daemon may own it now). */
-export async function removeDaemonInfo(port: number, pid: number, home = wtoHome()): Promise<void> {
+export async function removeDaemonInfo(port: number, pid: number, home = coordHome()): Promise<void> {
   const info = await readDaemonInfo(port, home);
   if (info?.pid === pid) await rm(daemonInfoPath(port, home), { force: true });
 }
@@ -67,7 +68,7 @@ export interface LocalTransportOptions extends Pick<
 
 export function localTransport(options: LocalTransportOptions = {}): Transport {
   const port = options.port ?? daemonPort();
-  const home = options.home ?? wtoHome();
+  const home = options.home ?? coordHome();
   let cached: { token: string; transport: Transport } | undefined;
 
   const current = async (): Promise<Transport> => {

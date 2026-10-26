@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CreateTaskInput, type Task } from "@wto/protocol";
+import { CreateTaskInput, type Task } from "@coord/protocol";
 import type { EventBus } from "./event-bus";
 
 // In-memory for the skeleton; Phase 1 moves this to SQLite (PRD §8 Persistence).

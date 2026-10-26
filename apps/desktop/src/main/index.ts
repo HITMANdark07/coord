@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { createClient, httpTransport, localDaemonUrl, type ConnectionStatus } from "@wto/client";
-import { daemonPort, localTransport } from "@wto/local-daemon";
+import { createClient, httpTransport, localDaemonUrl, type ConnectionStatus } from "@coord/client";
+import { daemonPort, localTransport } from "@coord/local-daemon";
 import {
   DAEMON_EVENT_CHANNEL,
   DAEMON_REQUEST_CHANNEL,
@@ -44,7 +44,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
     height: 760,
-    title: "Worktree Orchestrator",
+    title: "Coord",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -73,7 +73,7 @@ void app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-  await ensureDaemon(probe.health).catch((err: unknown) => console.error("[wto] daemon:", err));
+  await ensureDaemon(probe.health).catch((err: unknown) => console.error("[coord] daemon:", err));
 });
 
 // The daemon keeps running after the window closes (PRD FR-30); only the UI quits.

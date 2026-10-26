@@ -1,4 +1,4 @@
-import type { DaemonEvent, DaemonEventPayload } from "@wto/protocol";
+import type { DaemonEvent, DaemonEventPayload } from "@coord/protocol";
 
 type Listener = (event: DaemonEvent) => void;
 

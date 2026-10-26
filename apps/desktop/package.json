@@ -1,5 +1,5 @@
 {
-  "name": "@wto/desktop",
+  "name": "@coord/desktop",
   "version": "0.1.0",
   "private": true,
   "main": "./out/main/index.js",
@@ -16,12 +16,12 @@
     "@types/react": "~19.3.0",
     "@types/react-dom": "~19.3.0",
     "@vitejs/plugin-react": "6.1.2",
-    "@wto/app-state": "workspace:*",
-    "@wto/client": "workspace:*",
-    "@wto/local-daemon": "workspace:*",
-    "@wto/protocol": "workspace:*",
-    "@wto/tsconfig": "workspace:*",
-    "@wto/ui-web": "workspace:*",
+    "@coord/app-state": "workspace:*",
+    "@coord/client": "workspace:*",
+    "@coord/local-daemon": "workspace:*",
+    "@coord/protocol": "workspace:*",
+    "@coord/tsconfig": "workspace:*",
+    "@coord/ui-web": "workspace:*",
     "electron": "45.0.0",
     "electron-vite": "6.0.0",
     "react": "19.3.0",
@@ -35,7 +35,7 @@
       "platform:electron"
     ],
     "implicitDependencies": [
-      "@wto/core"
+      "@coord/core"
     ]
   }
 }
