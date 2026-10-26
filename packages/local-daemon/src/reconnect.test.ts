@@ -61,4 +61,17 @@ describe("localTransport reconnects", () => {
     stop();
     expect(live()).toHaveLength(0);
   });
+
+  it("reports closed when there is no daemon to connect to, and keeps retrying", async () => {
+    const home = await mkdtemp(join(tmpdir(), "coord-home-"));
+    const statuses: string[] = [];
+    const stop = localTransport({ port: 4997, home, reconnectDelayMs: 5 }).subscribe({
+      onEvent: () => {},
+      onStatus: (s) => statuses.push(s),
+    });
+    await tick(30);
+    stop();
+    expect(statuses[0]).toBe("closed");
+    expect(statuses.length).toBeGreaterThan(1); // still retrying
+  });
 });

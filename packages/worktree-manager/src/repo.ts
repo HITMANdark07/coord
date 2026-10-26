@@ -74,3 +74,8 @@ export async function readRepoConfig(repoPath: string, ref: string): Promise<Rep
   }
   return parsed.data;
 }
+
+/** True when git failed because the path is not inside a repository (as opposed to git itself failing). */
+export function isNotARepoError(e: unknown): boolean {
+  return e instanceof GitError && /not a git repository/i.test(e.stderr);
+}

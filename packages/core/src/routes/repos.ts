@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { AddRepoInput, type Repo } from "@coord/protocol";
-import { GitError, readRepoInfo } from "@coord/worktree-manager";
+import { GitError, isNotARepoError, readRepoInfo } from "@coord/worktree-manager";
 import type { Store } from "@coord/task-store";
 import { RunnerError } from "../runner/errors";
 import type { Routes } from "./types";
@@ -25,7 +25,8 @@ export const repoRoutes =
           // Exit code -1 means git never ran (not installed, not on PATH): the daemon's problem,
           // not the caller's, so 503 rather than a misleading "not a git repository".
           if (e.exitCode === -1) throw new RunnerError("unavailable", "git is not available to the daemon");
-          throw new RunnerError("invalid_request", `not a git repository: ${path}`);
+          if (isNotARepoError(e)) throw new RunnerError("invalid_request", `not a git repository: ${path}`);
+          throw new RunnerError("internal", `git failed for ${path}: ${e.stderr.trim() || e.message}`);
         }
         throw e;
       }

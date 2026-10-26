@@ -22,6 +22,7 @@ import {
   detectSetupCommands,
   forgetWorktree,
   GitError,
+  isNotARepoError,
   readRepoConfig,
   readRepoInfo,
   removeWorktree,
@@ -177,7 +178,10 @@ async function repoTopLevel(path: string): Promise<string> {
   } catch (e) {
     if (e instanceof GitError) {
       if (e.exitCode === -1) throw new RunnerError("unavailable", "git is not available to the daemon");
-      return path;
+      if (isNotARepoError(e)) return path;
+      // Any other git failure (ownership, permissions, a broken config) is not "unregistered":
+      // show git's own message, as a daemon-side problem.
+      throw new RunnerError("internal", `git failed for ${path}: ${gitMessage(e)}`);
     }
     throw e;
   }
@@ -400,8 +404,10 @@ export class TaskRunner {
       live.abort.abort();
       live.run?.end();
     }
-    await this.withinGrace(Promise.allSettled([...this.work]));
+    await this.withinGrace(Promise.allSettled([...this.work, ...this.closing.values()]));
     for (const task of this.deps.store.listTasks({ statuses: ACTIVE_STATUSES })) {
+      // A cancel or discard still running owns the task's final status.
+      if (this.closing.has(task.id)) continue;
       this.transition(task.id, "interrupted");
     }
   }

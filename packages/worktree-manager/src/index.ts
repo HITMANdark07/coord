@@ -1,6 +1,13 @@
 // Public API of @coord/worktree-manager. Export only what other packages need.
 export { GitError } from "./git";
-export { ConfigError, localBaseRef, readRepoConfig, readRepoInfo, resolveBaseRef } from "./repo";
+export {
+  ConfigError,
+  isNotARepoError,
+  localBaseRef,
+  readRepoConfig,
+  readRepoInfo,
+  resolveBaseRef,
+} from "./repo";
 export { slugify } from "./slug";
 export {
   copyEnvFiles,

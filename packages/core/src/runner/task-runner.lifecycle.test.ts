@@ -116,6 +116,20 @@ async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<s
 }
 
 describe("TaskRunner lifecycle", () => {
+  it("shutdown waits for an in-flight cancel and does not overwrite its result", async () => {
+    const { store, runner, create } = await setup([session, edit("a.txt"), waitForMessage, done]);
+    const task = await create();
+    await vi.waitFor(() =>
+      expect(existsSync(join(store.getTask(task.id)!.worktreePath ?? "/nope", "a.txt"))).toBe(true),
+    );
+    const cancelling = runner.cancel(task.id);
+    await runner.shutdown();
+    // The cancel finished inside shutdown, and nothing marked the task interrupted over it.
+    expect(store.getTask(task.id)!.status).toBe("cancelled");
+    await cancelling;
+    expect(store.getTask(task.id)!.status).toBe("cancelled");
+  });
+
   it("shutdown interrupts live runs, keeps their edits uncommitted and starts nothing queued", async () => {
     const { store, runner, adapter, create, commits } = await setup(
       [session, edit("a.txt"), waitForMessage, done],

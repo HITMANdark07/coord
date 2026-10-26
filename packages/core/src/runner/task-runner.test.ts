@@ -97,6 +97,33 @@ async function setup(
 }
 
 describe("TaskRunner", () => {
+  it("reports git's own failure, not 'register it', when git can't answer", async () => {
+    const { repo, runner } = await setup([done]);
+    const sub = join(repo.path, "sub");
+    await mkdir(sub);
+    // An unreadable config makes `git rev-parse` fail with something other than "not a git repository".
+    await writeFile(join(repo.path, ".git", "config"), "[broken\n");
+    const err = await runner.create({ repoPath: sub, prompt: "x" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RunnerError);
+    expect(err).toMatchObject({ code: "internal", message: expect.stringMatching(/config/i) });
+    expect((err as Error).message).not.toMatch(/coord repo add/);
+  });
+
+  it("reports an unavailable daemon when git is not installed", async () => {
+    const { repo, runner } = await setup([done]);
+    const empty = await mkdtemp(join(tmpdir(), "coord-nopath-"));
+    cleanup.push(empty);
+    const path = process.env.PATH;
+    process.env.PATH = empty;
+    try {
+      await expect(runner.create({ repoPath: repo.path, prompt: "x" })).rejects.toMatchObject({
+        code: "unavailable",
+      });
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+
   it("registers a task made from a repo subdirectory against the repo's top level", async () => {
     const { repo, runner, repoRecord } = await setup([editA, done]);
     const sub = join(repo.path, "src", "deep");
