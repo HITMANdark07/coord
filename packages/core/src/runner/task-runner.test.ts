@@ -111,6 +111,9 @@ describe("TaskRunner", () => {
     const other = await makeTempRepo();
     cleanup.push(dirname(other.path));
     await expect(runner.create({ repoPath: other.path, prompt: "x" })).rejects.toThrow(/coord repo add/);
+    const plain = await mkdtemp(join(tmpdir(), "coord-not-a-repo-"));
+    cleanup.push(plain);
+    await expect(runner.create({ repoPath: plain, prompt: "x" })).rejects.toThrow(/coord repo add/);
     await expect(runner.create({ repoPath: "/does/not/exist", prompt: "x" })).rejects.toThrow(
       /coord repo add/,
     );

@@ -21,6 +21,7 @@ import {
   deleteBranch,
   detectSetupCommands,
   forgetWorktree,
+  GitError,
   readRepoConfig,
   readRepoInfo,
   removeWorktree,
@@ -161,19 +162,32 @@ function gitMessage(e: unknown): string {
 }
 
 /**
+ * Git's top level for a path inside a repo, as `POST /repos` registers it. A path that is not
+ * inside a repo is returned as is, so the lookup fails with the "register it" error; a failure of
+ * git itself (not installed) is an error, not an unregistered repo.
+ */
+async function repoTopLevel(path: string): Promise<string> {
+  const isDir = await stat(path).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+  if (!isDir) return path;
+  try {
+    return (await readRepoInfo(path)).root;
+  } catch (e) {
+    if (e instanceof GitError) {
+      if (e.exitCode === -1) throw new RunnerError("unavailable", "git is not available to the daemon");
+      return path;
+    }
+    throw e;
+  }
+}
+
+/**
  * Runs tasks through spec §5's lifecycle: queued → setting_up → running ⇄ needs_input → review
  * (or failed). Each task gets its own worktree and `agent/` branch; every turn end is committed
  * there, so no work lives only as uncommitted files (spec §6).
  */
-/** Git's top level for a path inside a repo, as `POST /repos` registers it; the path itself if git can't say. */
-async function repoTopLevel(path: string): Promise<string> {
-  try {
-    return (await readRepoInfo(path)).root;
-  } catch {
-    return path; // not a repo: the lookup fails with the "register it" error
-  }
-}
-
 export class TaskRunner {
   private readonly live = new Map<string, Live>();
   /** In-flight setup/run work, for `idle()`. */
@@ -185,6 +199,9 @@ export class TaskRunner {
    * turn end or setup failure the cancel causes records nothing, and nothing starts the task.
    */
   private readonly closing = new Map<string, Promise<TaskRecord>>();
+
+  /** Set by shutdown(): turn ends and failures record nothing, and no queued task starts. */
+  private shuttingDown = false;
 
   constructor(private readonly deps: TaskRunnerDeps) {}
 
@@ -372,6 +389,23 @@ export class TaskRunner {
     return count;
   }
 
+  /**
+   * Daemon stop: aborts every live run, waits (up to the stop grace) for them to settle, then
+   * marks the tasks that were working `interrupted`, as recoverOnStart would. Nothing is
+   * committed: edits stay in the worktree and resume commits them (spec §6).
+   */
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    for (const live of this.live.values()) {
+      live.abort.abort();
+      live.run?.end();
+    }
+    await this.withinGrace(Promise.allSettled([...this.work]));
+    for (const task of this.deps.store.listTasks({ statuses: ACTIVE_STATUSES })) {
+      this.transition(task.id, "interrupted");
+    }
+  }
+
   /** Deletes the `agent/` branches of tasks discarded more than 14 days before `now` (spec §6). */
   async sweepDiscardedBranches(now = new Date()): Promise<number> {
     let count = 0;
@@ -406,6 +440,7 @@ export class TaskRunner {
 
   /** Starts queued tasks, oldest first, while slots are free. */
   private schedule(): void {
+    if (this.shuttingDown) return;
     const { store, maxConcurrent } = this.deps;
     let free =
       maxConcurrent - store.listTasks({ statuses: ACTIVE_STATUSES }).filter((t) => this.holdsSlot(t)).length;
@@ -553,6 +588,10 @@ export class TaskRunner {
     const { store } = this.deps;
     for await (const event of run.events) {
       this.publish({ kind: "agent.event", taskId, event });
+      if (this.shuttingDown) {
+        await this.endTurn(taskId, live, run);
+        return;
+      }
       switch (event.type) {
         case "session":
           store.updateTask(taskId, { sessionId: event.sessionId });
@@ -593,6 +632,13 @@ export class TaskRunner {
    */
   private async endTurn(taskId: string, live: Live, run: AgentRun, failure?: string): Promise<void> {
     live.ending = true;
+    if (this.shuttingDown) {
+      // The daemon is stopping: no commit and no status change, shutdown() interrupts the task.
+      live.abort.abort();
+      run.end();
+      if (this.live.get(taskId) === live) this.live.delete(taskId);
+      return;
+    }
     // Messages still queued now will never run here: an interrupt or cancel made this turn the
     // last, or an error ended the run early.
     live.dropped.push(...live.queued.splice(0));
@@ -823,7 +869,7 @@ export class TaskRunner {
 
   private fail(taskId: string, error: string): null {
     // A cancel stopped the setup on purpose; it sets the final status itself.
-    if (!this.closing.has(taskId)) this.transition(taskId, "failed", { error });
+    if (!this.closing.has(taskId) && !this.shuttingDown) this.transition(taskId, "failed", { error });
     return null;
   }
 

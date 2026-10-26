@@ -41,17 +41,31 @@ const updated = (id: string, status: string, seq = 1) =>
 
 /** A daemon that lists the three tasks above and answers everything else with `rest`. */
 const daemon = (rest: (req: TransportRequest) => unknown = () => task(ID_A)) =>
-  fakeTransport((req) =>
-    req.method === "GET" && req.path.startsWith("/tasks?") ? [task(ID_A), task(ID_B), task(ID_C)] : rest(req),
+  fakeTransport(
+    (req) =>
+      req.method === "GET" && req.path.startsWith("/tasks?")
+        ? [task(ID_A), task(ID_B), task(ID_C)]
+        : rest(req),
+    // Like a real socket: nothing is delivered before it opens.
+    { gateEvents: true },
   );
 
-/** Runs `coord watch`, resolving with its exit code and output once it finishes. */
-async function watch(transport: ReturnType<typeof daemon>, id: string, act?: () => void) {
+/**
+ * Runs `coord watch` against a gated transport. `beforeOpen` runs once the command has subscribed
+ * but before the socket opens; `act` runs after it opened and the task was read.
+ */
+async function watch(
+  transport: ReturnType<typeof daemon>,
+  id: string,
+  { beforeOpen, act }: { beforeOpen?: () => void; act?: () => void } = {},
+) {
   const lines: string[] = [];
+  const errors: string[] = [];
   let code: number | undefined;
   const finished = new Promise<void>((resolveDone) => {
     const program = buildProgram(createClient(transport), {
       log: (l) => lines.push(l),
+      logError: (l) => errors.push(l),
       exit: (c) => {
         code = c;
         resolveDone();
@@ -59,12 +73,15 @@ async function watch(transport: ReturnType<typeof daemon>, id: string, act?: () 
     });
     void program.parseAsync(["watch", id], { from: "user" });
   });
-  // Let the command subscribe and read the task before acting.
   await vi.waitFor(() => expect(transport.subscribeCalls).toBe(1));
+  // The task is read only once the socket is open, never before.
+  expect(transport.requests.some((r) => r.path === `/tasks/${ID_A}`)).toBe(false);
+  beforeOpen?.();
+  transport.setStatus("open");
   await vi.waitFor(() => expect(transport.requests.some((r) => r.path === `/tasks/${ID_A}`)).toBe(true));
   act?.();
   await finished;
-  return { code, lines };
+  return { code, lines, errors };
 }
 
 describe("coord cli", () => {
@@ -186,7 +203,9 @@ describe("coord cli", () => {
       ["failed", 1],
     ] as const) {
       const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
-      const result = await watch(transport, "aaaa1111", () => transport.emit(updated(ID_A, status)));
+      const result = await watch(transport, "aaaa1111", {
+        act: () => transport.emit(updated(ID_A, status)),
+      });
       expect(result.code).toBe(expected);
       expect(result.lines).toContain(`task ${status}`);
     }
@@ -194,37 +213,69 @@ describe("coord cli", () => {
 
   it("watch ignores other tasks' transitions and unsubscribes when done", async () => {
     const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
-    const result = await watch(transport, ID_A, () => {
-      transport.emit(updated(ID_B, "failed"));
-      transport.emit(updated(ID_A, "review", 2));
+    const result = await watch(transport, ID_A, {
+      act: () => {
+        transport.emit(updated(ID_B, "failed"));
+        transport.emit(updated(ID_A, "review", 2));
+      },
     });
     expect(result.code).toBe(0);
     transport.emit(updated(ID_A, "failed", 3)); // no listener left: must not throw
   });
 
-  it("watch does not miss a task that finished before it subscribed", async () => {
-    const transport = fakeTransport((req) =>
-      req.path.startsWith("/tasks?") ? [task(ID_A)] : task(ID_A, "failed"),
-    );
-    const lines: string[] = [];
-    let code: number | undefined;
-    await buildProgram(createClient(transport), {
-      log: (l) => lines.push(l),
-      exit: (c) => (code = c),
-    }).parseAsync(["watch", ID_A], { from: "user" });
-    expect(code).toBe(1);
-    expect(transport.subscribeCalls).toBe(1);
-    expect(transport.requests.map((r) => r.path)).toEqual([
-      expect.stringContaining("/tasks?"),
-      `/tasks/${ID_A}`,
-    ]);
+  it("watch sees a transition that happened before the socket opened, through the snapshot", async () => {
+    let current = "running";
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A, current) : undefined));
+    const result = await watch(transport, ID_A, {
+      beforeOpen: () => {
+        current = "review";
+        transport.emit(updated(ID_A, "review")); // lost: the socket is not open yet
+      },
+    });
+    expect(result.code).toBe(0);
+    expect(result.lines).toContain("task review");
   });
 
-  it("watch exits 1 with a message when the connection is lost", async () => {
-    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
-    const result = await watch(transport, ID_A, () => transport.setStatus("closed"));
+  it("watch exits at once for a task that already finished", async () => {
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A, "failed") : undefined));
+    const result = await watch(transport, ID_A);
     expect(result.code).toBe(1);
-    expect(result.lines.at(-1)).toMatch(/connection to the daemon lost/);
+  });
+
+  it("watch exits 1 with a hint, on stderr, for an interrupted task", async () => {
+    const snapshot = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A, "interrupted") : undefined));
+    const a = await watch(snapshot, ID_A);
+    expect(a.code).toBe(1);
+    expect(a.errors.join("\n")).toMatch(/interrupted; resume it with coord resume aaaa1111/);
+    expect(a.lines.join("\n")).not.toMatch(/resume it/);
+
+    const live = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
+    const b = await watch(live, ID_A, { act: () => live.emit(updated(ID_A, "interrupted")) });
+    expect(b.code).toBe(1);
+    expect(b.errors.join("\n")).toMatch(/coord resume/);
+  });
+
+  it("watch exits 1 with a message on stderr when the connection is lost or the task can't be read", async () => {
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
+    const lost = await watch(transport, ID_A, { act: () => transport.setStatus("closed") });
+    expect(lost.code).toBe(1);
+    expect(lost.errors.at(-1)).toMatch(/connection to the daemon lost/);
+    expect(lost.lines.join("\n")).not.toMatch(/lost/);
+
+    const broken = daemon((req) => {
+      if (req.path === `/tasks/${ID_A}`) throw new Error("boom");
+      return undefined;
+    });
+    const failed = await watch(broken, ID_A);
+    expect(failed.code).toBe(1);
+    expect(failed.errors).toEqual(["boom"]);
+  });
+
+  it("new -- passes a prompt that starts with a dash", async () => {
+    process.env.INIT_CWD = "/home/me/project";
+    const transport = fakeTransport(() => task(ID_A, "queued"));
+    await run(createClient(transport), "new", "--", "-x");
+    expect((transport.requests[0] as TransportRequest).body).toMatchObject({ prompt: "-x" });
   });
 
   it("show prints status, usage, error, pending permissions and the last 20 events", async () => {

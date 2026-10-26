@@ -116,6 +116,28 @@ async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<s
 }
 
 describe("TaskRunner lifecycle", () => {
+  it("shutdown interrupts live runs, keeps their edits uncommitted and starts nothing queued", async () => {
+    const { store, runner, adapter, create, commits } = await setup(
+      [session, edit("a.txt"), waitForMessage, done],
+      { maxConcurrent: 1 },
+    );
+    const first = await create();
+    const second = await create({ prompt: "Second task" });
+    await vi.waitFor(() =>
+      expect(existsSync(join(store.getTask(first.id)!.worktreePath ?? "/nope", "a.txt"))).toBe(true),
+    );
+    expect(store.getTask(second.id)!.status).toBe("queued");
+
+    await runner.shutdown();
+
+    const t = store.getTask(first.id)!;
+    expect(t.status).toBe("interrupted");
+    expect(await readFile(join(t.worktreePath!, "a.txt"), "utf8")).toBe("a.txt from the agent\n");
+    expect(commits(t.branch!)).toEqual([]);
+    expect(store.getTask(second.id)!.status).toBe("queued");
+    expect(adapter.calls.start).toHaveLength(1);
+  });
+
   it("message during a running turn is sent live", async () => {
     const { store, runner, adapter, create, events } = await setup([session, waitForMessage, done]);
     const task = await create();

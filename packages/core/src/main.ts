@@ -45,6 +45,7 @@ runner = new TaskRunner({
   home,
   maxConcurrent: Number.isInteger(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 3,
 });
+const taskRunner: TaskRunner = runner;
 const app = createServer({ token, allowedOrigins, bus, store, runner, broker });
 
 // Tasks a previous daemon left mid-flight are settled before any client can connect.
@@ -58,7 +59,7 @@ const sweep = () =>
     },
     (error: unknown) => console.error("branch sweep failed:", error instanceof Error ? error.message : error),
   );
-await sweep();
+void sweep(); // never delays listen; errors are logged inside
 const sweepTimer = setInterval(() => void sweep(), 60 * 60 * 1000);
 sweepTimer.unref();
 
@@ -76,6 +77,8 @@ async function shutdown(): Promise<void> {
   // Each step is guarded: one failure must not leave the lock or the daemon info behind.
   const steps: Array<[string, () => unknown]> = [
     ["close server", () => app.close()],
+    // Stops live agent runs before the store closes, so none publishes into a closed database.
+    ["stop runs", () => taskRunner.shutdown()],
     ["close store", () => store.close()],
     ["remove daemon info", () => removeDaemonInfo(port, process.pid)],
     ["release lock", () => lock.release()],

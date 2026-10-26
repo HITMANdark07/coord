@@ -5,6 +5,21 @@ import { createClient } from "@coord/client";
 import { fakeTransport } from "@coord/client/testing";
 import { createMcpServer } from "./server";
 
+const task = (over: Record<string, unknown> = {}) => ({
+  id: "t1",
+  repoPath: "/abs/repo",
+  title: "x",
+  prompt: "x",
+  agent: "claude-code",
+  status: "queued",
+  branch: null,
+  worktreePath: null,
+  sessionId: null,
+  costUsd: 0,
+  createdAt: "2026-10-26T00:00:00.000Z",
+  ...over,
+});
+
 describe("coord MCP server", () => {
   it("exposes the task tools to an MCP client", async () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -27,20 +42,7 @@ describe("coord MCP server", () => {
   });
 
   it("creates tasks for absolute repo paths and rejects relative ones before calling the daemon", async () => {
-    const task = {
-      id: "t1",
-      repoPath: "/abs/repo",
-      title: "x",
-      prompt: "x",
-      agent: "claude-code",
-      status: "queued",
-      branch: null,
-      worktreePath: null,
-      sessionId: null,
-      costUsd: 0,
-      createdAt: "2026-10-26T00:00:00.000Z",
-    };
-    const transport = fakeTransport(() => task);
+    const transport = fakeTransport(() => task());
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await createMcpServer(createClient(transport)).connect(serverSide);
     const mcp = new Client({ name: "test", version: "0.0.0" });
@@ -71,19 +73,7 @@ describe("coord MCP server", () => {
   }
 
   it("create_task accepts agent and refuses bypass", async () => {
-    const transport = fakeTransport(() => ({
-      id: "t1",
-      repoPath: "/abs/repo",
-      title: "x",
-      prompt: "x",
-      agent: "codex",
-      status: "queued",
-      branch: null,
-      worktreePath: null,
-      sessionId: null,
-      costUsd: 0,
-      createdAt: "2026-10-26T00:00:00.000Z",
-    }));
+    const transport = fakeTransport(() => task({ agent: "codex" }));
     const mcp = await connect(transport);
 
     const bypass = await mcp.callTool({
@@ -116,19 +106,7 @@ describe("coord MCP server", () => {
     const transport = fakeTransport((req) =>
       req.path.endsWith("/diff")
         ? { baseRef: "main", files: [], patch: "P", truncated: false }
-        : {
-            id: "t1",
-            repoPath: "/abs/repo",
-            title: "x",
-            prompt: "x",
-            agent: "claude-code",
-            status: "running",
-            branch: null,
-            worktreePath: null,
-            sessionId: null,
-            costUsd: 0,
-            createdAt: "2026-10-26T00:00:00.000Z",
-          },
+        : task({ status: "running" }),
     );
     const mcp = await connect(transport);
     const sent = await mcp.callTool({ name: "send_message", arguments: { id: "t1", text: "go on" } });

@@ -8,6 +8,8 @@ const userCwd = () => process.env.INIT_CWD ?? process.cwd();
 
 export interface ProgramDeps {
   log?: (line: string) => void;
+  /** Where errors and hints go (stderr). */
+  logError?: (line: string) => void;
   /** The daemon's token, read from the owner-only token file. */
   readToken?: () => Promise<string | undefined>;
   /** Sets the process exit code (`coord watch`). Default: `process.exitCode`. */
@@ -17,7 +19,14 @@ export interface ProgramDeps {
 type DaemonEvent = Parameters<NonNullable<DaemonEventListener["onEvent"]>>[0];
 
 /** Statuses `coord watch` stops at, with the exit code each gives. */
-const WATCH_END: Record<string, number> = { review: 0, cancelled: 0, merged: 0, cleaned_up: 0, failed: 1 };
+const WATCH_END: Record<string, number> = {
+  review: 0,
+  cancelled: 0,
+  merged: 0,
+  cleaned_up: 0,
+  failed: 1,
+  interrupted: 1,
+};
 
 const oneLine = (text: string, max = 200) => {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -63,7 +72,12 @@ function describeEvent(event: DaemonEvent, taskId: string): string | undefined {
 
 export function buildProgram(
   client: CoordClient,
-  { log = console.log, readToken, exit = (code) => void (process.exitCode = code) }: ProgramDeps = {},
+  {
+    log = console.log,
+    logError = console.error,
+    readToken,
+    exit = (code) => void (process.exitCode = code),
+  }: ProgramDeps = {},
 ) {
   const program = new Command("coord").description("Run coding agents in parallel git worktrees");
   const id = (input: string) => resolveTaskId(client, input);
@@ -118,7 +132,7 @@ export function buildProgram(
   program
     .command("new")
     .description("create a task")
-    .argument("<prompt>", "what the agent should do")
+    .argument("<prompt>", "what the agent should do (use `--` first if it starts with -)")
     .option("-r, --repo <path>", "repository path (default: current directory)")
     .addOption(new Option("--agent <agent>", "which agent runs it").choices(["claude-code", "codex"]))
     .option("--model <model>", "model the agent uses")
@@ -191,19 +205,21 @@ export function buildProgram(
       await new Promise<void>((done) => {
         let finished = false;
         let unsubscribe: (() => void) | undefined = undefined;
-        const finish = (code: number, line?: string) => {
+        const finish = (code: number, line?: string, toError = false) => {
           if (finished) return;
           finished = true;
-          if (line) log(line);
+          if (line) (toError ? logError : log)(line);
           unsubscribe?.();
           exit(code);
           done();
         };
         const check = (status: string) => {
           const code = WATCH_END[status];
-          if (code !== undefined) finish(code, `task ${status}`);
+          if (code === undefined) return;
+          if (status === "interrupted") {
+            finish(code, `interrupted; resume it with coord resume ${taskId.slice(0, 8)}`, true);
+          } else finish(code, `task ${status}`);
         };
-        // Subscribe before reading the task: a transition between the two can't be missed.
         unsubscribe = client.subscribe({
           onEvent: (event) => {
             const line = describeEvent(event, taskId);
@@ -213,17 +229,19 @@ export function buildProgram(
             }
           },
           onStatus: (s) => {
-            if (s === "closed") finish(1, "connection to the daemon lost");
+            if (s === "closed") return finish(1, "connection to the daemon lost", true);
+            // The daemon never replays events, and a socket delivers nothing before it opens: a
+            // transition before this point is only visible in the task itself, so read it now.
+            client.getTask(taskId).then(
+              (task) => {
+                if (finished) return;
+                log(`status: ${task.status}`);
+                check(task.status);
+              },
+              (err: unknown) => finish(1, err instanceof Error ? err.message : String(err), true),
+            );
           },
         });
-        client.getTask(taskId).then(
-          (task) => {
-            if (finished) return;
-            log(`status: ${task.status}`);
-            check(task.status);
-          },
-          (err: unknown) => finish(1, err instanceof Error ? err.message : String(err)),
-        );
       });
     });
 
@@ -254,7 +272,7 @@ export function buildProgram(
     .command("msg")
     .description("send a message to a task's agent")
     .argument("<id>", "task id or unique prefix")
-    .argument("<text>")
+    .argument("<text>", "the message (use `--` first if it starts with -)")
     .action(async (input: string, text: string) => {
       const task = await client.sendMessage(await id(input), text);
       log(`sent to ${task.id.slice(0, 8)} (${task.status})`);
