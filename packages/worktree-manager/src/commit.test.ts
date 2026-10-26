@@ -29,6 +29,24 @@ describe("commitTurn", () => {
     expect(await hasChanges(path)).toBe(false);
   });
 
+  it("never stages excluded files, and doesn't commit when only they changed", async () => {
+    const { path, env } = await agentRepo();
+    await mkdir(join(path, "app"));
+    await writeFile(join(path, ".env"), "SECRET=1\n");
+    await writeFile(join(path, "app/.env.local"), "SECRET=2\n");
+    const exclude = [".env", "app/.env.local"];
+    expect(await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env, exclude })).toEqual({
+      committed: false,
+    });
+    await writeFile(join(path, "a.txt"), "a");
+    const r = await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env, exclude });
+    expect(r.committed).toBe(true);
+    const files = execFileSync("git", ["show", "--name-only", "--format="], { cwd: path, encoding: "utf8" });
+    expect(files.trim()).toBe("a.txt");
+    const st = execFileSync("git", ["status", "--porcelain"], { cwd: path, encoding: "utf8" });
+    expect(st).toBe("?? .env\n?? app/\n");
+  });
+
   it("is a no-op without changes", async () => {
     const { path, env } = await agentRepo();
     expect(await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env })).toEqual({

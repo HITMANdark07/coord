@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   ConfigError,
   GitError,
+  branchTip,
   copyEnvFiles,
   createWorktree,
   deleteBranch,
@@ -14,6 +15,7 @@ import {
   forgetWorktree,
   readRepoConfig,
   readRepoInfo,
+  removeEnvCopies,
   removeWorktree,
   resolveBaseRef,
   runCommands,
@@ -162,6 +164,31 @@ describe("worktrees", () => {
     ac.abort();
     const r = await p;
     expect(r.ok).toBe(false);
+  });
+
+  it("removeEnvCopies deletes only untracked copies identical to the checkout's", async () => {
+    const { path, env } = await makeTempRepo();
+    for (const f of [".env", ".env.edited", ".env.tracked"]) await writeFile(join(path, f), "A=1\n");
+    const wt = join(await tmp(), "wt");
+    git(path, env, "add", ".env.tracked");
+    git(path, env, "commit", "-m", "tracked env");
+    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/e", baseRef: "main" });
+    const files = [".env", ".env.edited", ".env.tracked"];
+    await copyEnvFiles(path, wt, files);
+    await writeFile(join(wt, ".env.edited"), "A=2\n");
+
+    await removeEnvCopies(path, wt, files);
+
+    expect(existsSync(join(wt, ".env"))).toBe(false);
+    expect(await readFile(join(wt, ".env.edited"), "utf8")).toBe("A=2\n");
+    expect(existsSync(join(wt, ".env.tracked"))).toBe(true);
+    expect(existsSync(join(path, ".env"))).toBe(true);
+  });
+
+  it("branchTip reads a local branch's commit, null when there is none", async () => {
+    const { path, env } = await makeTempRepo();
+    expect(await branchTip(path, "main")).toBe(git(path, env, "rev-parse", "main").trim());
+    expect(await branchTip(path, "agent/none")).toBeNull();
   });
 
   it("removeWorktree refuses a dirty worktree", async () => {

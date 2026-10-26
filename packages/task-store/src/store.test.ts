@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { DaemonEvent, PermissionRequestView } from "@coord/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { MIGRATIONS } from "./migrations";
 import { openStore, StoreConflictError, type Store, type TaskRecord } from "./index";
 
 type NewTask = Omit<TaskRecord, "id" | "createdAt" | "updatedAt">;
@@ -36,6 +37,8 @@ const newTask = (repoId: string, over: Partial<NewTask> = {}): NewTask => ({
   portBase: null,
   pendingMessage: null,
   discardedAt: null,
+  discardedTip: null,
+  envFiles: [],
   ...over,
 });
 
@@ -112,6 +115,38 @@ describe("task store", () => {
     store.close();
     expect(version()).toBe(before);
     store = openStore(file);
+  });
+
+  it("upgrades a coord.db made by the first schema, keeping its tasks", () => {
+    const old = join(dir, "old.db");
+    const db = new Database(old);
+    db.exec(MIGRATIONS[0] as string);
+    db.pragma("user_version = 1");
+    db.prepare(
+      `INSERT INTO tasks (id, repo_id, repo_path, title, prompt, agent, status, permission_mode,
+         discarded_at, created_at, updated_at)
+       VALUES ('t-old', 'r1', '/work/app', 'Old', 'p', 'claude-code', 'cancelled', 'ask',
+         '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    ).run();
+    db.close();
+
+    const upgraded = openStore(old);
+    try {
+      expect(upgraded.getTask("t-old")).toMatchObject({
+        title: "Old",
+        status: "cancelled",
+        discardedAt: "2026-10-01T00:00:00.000Z",
+        discardedTip: null,
+        envFiles: [],
+      });
+      const t = upgraded.updateTask("t-old", { discardedTip: "abc123", envFiles: [".env", "app/.env"] });
+      expect(t).toMatchObject({ discardedTip: "abc123", envFiles: [".env", "app/.env"] });
+    } finally {
+      upgraded.close();
+    }
+    const check = new Database(old);
+    expect(check.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+    check.close();
   });
 
   it("rejects a repo path registered twice", () => {

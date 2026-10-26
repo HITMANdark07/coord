@@ -10,10 +10,12 @@ export {
 } from "./repo";
 export { slugify } from "./slug";
 export {
+  branchTip,
   copyEnvFiles,
   createWorktree,
   deleteBranch,
   forgetWorktree,
+  removeEnvCopies,
   removeWorktree,
   uniqueBranch,
 } from "./worktree";

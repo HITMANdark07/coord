@@ -11,12 +11,21 @@ export async function hasChanges(cwd: string, env?: Record<string, string>): Pro
   return (await git(["status", "--porcelain"], { cwd, env })).trim().length > 0;
 }
 
+async function hasStagedChanges(cwd: string, env?: Record<string, string>): Promise<boolean> {
+  return (await git(["diff", "--cached", "--name-only"], { cwd, env })).trim().length > 0;
+}
+
 export async function commitTurn(opts: {
   cwd: string;
   /** The `agent/` branch this task owns; HEAD must still be on it. */
   branch: string;
   message: string;
   trailers: string[];
+  /**
+   * Paths (relative to `cwd`) never staged: the env files Coord copied in hold secrets, and
+   * the repo may not ignore them. They stay on disk, uncommitted.
+   */
+  exclude?: string[];
   env?: Record<string, string>;
 }): Promise<{ committed: false } | { committed: true; sha: string }> {
   const { cwd, env } = opts;
@@ -37,8 +46,10 @@ export async function commitTurn(opts: {
       ),
     );
   }
-  await git(["add", "-A"], { cwd, env });
-  if (!(await hasChanges(cwd, env))) return { committed: false };
+  const excluded = (opts.exclude ?? []).map((f) => `:(exclude,literal)${f}`);
+  await git(["add", "-A", "--", ".", ...excluded], { cwd, env });
+  // Staged, not `status`: an excluded file that changed is not a reason to commit.
+  if (!(await hasStagedChanges(cwd, env))) return { committed: false };
   const body = opts.trailers.length
     ? `${opts.message}\n\n${opts.trailers.join("\n")}\n`
     : `${opts.message}\n`;

@@ -358,6 +358,8 @@ describe("diff route", () => {
       portBase: null,
       pendingMessage: null,
       discardedAt: null,
+      discardedTip: null,
+      envFiles: [],
     });
     const res = await d.call("GET", `/tasks/${task.id}/diff`);
     expect(res.statusCode).toBe(409);

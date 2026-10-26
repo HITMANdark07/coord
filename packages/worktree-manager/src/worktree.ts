@@ -68,9 +68,33 @@ export async function copyEnvFiles(
     if (opts.skipExisting && (await exists(join(worktreePath, rel)))) continue;
     await mkdir(dirname(join(worktreePath, rel)), { recursive: true });
     await copyFile(join(repoPath, rel), join(worktreePath, rel));
-    copied.push(file);
+    // Normalized: the caller excludes these paths from commits by exact path.
+    copied.push(rel);
   }
   return copied;
+}
+
+/**
+ * Deletes the worktree's copies of env files that are untracked there and still identical to
+ * the user's checkout, so `removeWorktree` (which refuses untracked files) can go ahead. A copy
+ * the agent changed, or a tracked file, stays: removing the worktree then fails and says why.
+ */
+export async function removeEnvCopies(
+  repoPath: string,
+  worktreePath: string,
+  files: string[],
+): Promise<void> {
+  for (const file of files) {
+    const status = await git(["status", "--porcelain", "-z", "--", `:(literal)${file}`], {
+      cwd: worktreePath,
+    });
+    if (status !== `?? ${file}\0`) continue;
+    const [original, copy] = await Promise.all([
+      readFile(join(repoPath, file)).catch(() => null),
+      readFile(join(worktreePath, file)),
+    ]);
+    if (original !== null && original.equals(copy)) await rm(join(worktreePath, file));
+  }
 }
 
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
@@ -119,6 +143,18 @@ export async function forgetWorktree(repoPath: string, worktreePath: string): Pr
       throw new Error(`worktree ${worktreePath} is locked; unlock it with \`git worktree unlock\``);
     }
     await rm(join(admin, name), { recursive: true, force: true });
+  }
+}
+
+/** The commit `refs/heads/<branch>` points at, or null when there is no such branch. */
+export async function branchTip(repoPath: string, branch: string): Promise<string | null> {
+  try {
+    return (
+      await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repoPath })
+    ).trim();
+  } catch (e) {
+    if (e instanceof GitError) return null;
+    throw e;
   }
 }
 

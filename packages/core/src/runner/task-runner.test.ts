@@ -157,6 +157,8 @@ describe("TaskRunner", () => {
       expect(Object.keys(e.payload.task)).not.toContain("portBase");
       expect(Object.keys(e.payload.task)).not.toContain("pendingMessage");
       expect(Object.keys(e.payload.task)).not.toContain("discardedAt");
+      expect(Object.keys(e.payload.task)).not.toContain("discardedTip");
+      expect(Object.keys(e.payload.task)).not.toContain("envFiles");
     }
 
     const task = store.getTask(created.id)!;
@@ -174,6 +176,47 @@ describe("TaskRunner", () => {
     );
     expect(git(task.worktreePath!, "show", "HEAD:a.txt")).toBe("from the agent\n");
     expect(task.worktreePath).toMatch(/\/worktrees\/repo-[^/]+\/fix-it$/);
+  });
+
+  it("titles are one line: whitespace and newlines collapse, so the commit subject is one line", async () => {
+    const { repo, store, runner, create } = await setup([editA, done]);
+    const explicit = await create({ title: "  Line one\nline two\r\n\tand  three " });
+    await runner.idle();
+    const t = store.getTask(explicit.id)!;
+    expect(t.title).toBe("Line one line two and three");
+    const subject = git(repo.path, "log", "-1", "--format=%B", t.branch!).split("\n")[0];
+    expect(subject).toBe("Line one line two and three (turn 1)");
+
+    const derived = await create({ prompt: "  Fix\t\tthe   bug \nmore detail" });
+    await runner.idle();
+    expect(store.getTask(derived.id)!.title).toBe("Fix the bug");
+    const long = await create({ title: `${"word ".repeat(11)}\n${"x".repeat(80)}` });
+    await runner.idle();
+    expect(store.getTask(long.id)!.title).toBe(`${"word ".repeat(11)}xxxxx`);
+  });
+
+  it("never commits an env file it copied, even one the repo doesn't ignore", async () => {
+    const { repo, store, runner, create } = await setup([editA, done], { config: { envFiles: [".env"] } });
+    // In the user's checkout, not committed and not git-ignored.
+    await writeFile(join(repo.path, ".env"), "SECRET=1\n");
+    const task = await create();
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("review");
+    expect(t.envFiles).toEqual([".env"]);
+    expect(await readFile(join(t.worktreePath!, ".env"), "utf8")).toBe("SECRET=1\n");
+    const files = git(repo.path, "show", "--name-only", "--format=", t.branch!).trim().split("\n");
+    expect(files).toContain("a.txt");
+    expect(files).not.toContain(".env");
+    // Still on disk for the agent, still not committed: the user decides what to do with it.
+    expect(git(t.worktreePath!, "status", "--porcelain")).toBe("?? .env\n");
+
+    // The untouched copy doesn't block a discard; it was a copy of the user's file.
+    await runner.discard(task.id);
+    expect(store.getTask(task.id)!.status).toBe("cancelled");
+    expect(existsSync(t.worktreePath!)).toBe(false);
+    expect(git(repo.path, "show", "--name-only", "--format=", t.branch!)).not.toContain(".env");
   });
 
   it("leaves the user's checkout untouched", async () => {

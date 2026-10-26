@@ -17,6 +17,10 @@ export type TaskRecord = Task & {
   portBase: number | null;
   pendingMessage: string | null;
   discardedAt: string | null;
+  /** The branch tip when the task was discarded; null before the discard (or for older tasks). */
+  discardedTip: string | null;
+  /** Env files copied into the worktree (relative paths); commits never include them. */
+  envFiles: string[];
 };
 export type NewTask = Omit<TaskRecord, "id" | "createdAt" | "updatedAt">;
 export type PermissionOutcome = "allowed" | "always" | "denied" | "withdrawn";
@@ -47,6 +51,8 @@ const TASK_COLUMNS = {
   portBase: "port_base",
   pendingMessage: "pending_message",
   discardedAt: "discarded_at",
+  discardedTip: "discarded_tip",
+  envFiles: "env_files",
   updatedAt: "updated_at",
 } as const satisfies Partial<Record<keyof TaskRecord, string>>;
 
@@ -90,6 +96,8 @@ function toTask(r: Row): TaskRecord {
     portBase: r.port_base as number | null,
     pendingMessage: r.pending_message as string | null,
     discardedAt: r.discarded_at as string | null,
+    discardedTip: r.discarded_tip as string | null,
+    envFiles: JSON.parse(r.env_files as string) as string[],
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   };
@@ -124,8 +132,9 @@ function eventTaskId(e: DaemonEvent): string | null {
   }
 }
 
-/** SQLite makes a bound `undefined` an error; a missing optional field is NULL. */
-const bind = (v: unknown): unknown => (typeof v === "boolean" ? Number(v) : (v ?? null));
+/** SQLite makes a bound `undefined` an error; a missing optional field is NULL. Lists are JSON. */
+const bind = (v: unknown): unknown =>
+  typeof v === "boolean" ? Number(v) : Array.isArray(v) ? JSON.stringify(v) : (v ?? null);
 
 export class Store {
   constructor(private readonly db: Database.Database) {}

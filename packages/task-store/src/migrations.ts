@@ -61,4 +61,10 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX permissions_task ON permissions (task_id);
   `,
+  // discarded_tip: the branch tip at discard, so the sweep never deletes work added after it.
+  // env_files: JSON list of the env files copied into the worktree, never committed (spec §6).
+  `
+  ALTER TABLE tasks ADD COLUMN discarded_tip TEXT;
+  ALTER TABLE tasks ADD COLUMN env_files TEXT NOT NULL DEFAULT '[]';
+  `,
 ];

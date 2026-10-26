@@ -15,6 +15,7 @@ import {
 } from "@coord/protocol";
 import type { Store, TaskRecord } from "@coord/task-store";
 import {
+  branchTip,
   commitTurn,
   copyEnvFiles,
   createWorktree,
@@ -25,6 +26,7 @@ import {
   isNotARepoError,
   readRepoConfig,
   readRepoInfo,
+  removeEnvCopies,
   removeWorktree,
   resolveBaseRef,
   runCommands,
@@ -118,7 +120,14 @@ interface Live {
 
 /** The task as clients see it: daemon-only bookkeeping stays out of `task.updated`. */
 export function toTask(record: TaskRecord): Task {
-  const { portBase: _portBase, pendingMessage: _pendingMessage, discardedAt: _discardedAt, ...task } = record;
+  const {
+    portBase: _portBase,
+    pendingMessage: _pendingMessage,
+    discardedAt: _discardedAt,
+    discardedTip: _discardedTip,
+    envFiles: _envFiles,
+    ...task
+  } = record;
   return task;
 }
 
@@ -126,9 +135,14 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** One line, single spaces: the title is the subject of every commit (spec §6) and a list row. */
+function normalizeTitle(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, TITLE_MAX).trim();
+}
+
 function titleFrom(prompt: string): string {
   const line = prompt.split("\n").find((l) => l.trim().length > 0) ?? prompt;
-  return line.trim().slice(0, TITLE_MAX);
+  return normalizeTitle(line);
 }
 
 /** `git check-ref-format --branch`, without a shell: the name comes from a client. */
@@ -141,14 +155,6 @@ function isValidBranchName(name: string, cwd: string): Promise<boolean> {
 /** A base branch name git takes as a branch, never as an option (it reaches fetch and show). */
 async function isValidBaseBranch(name: string, cwd: string): Promise<boolean> {
   return !name.startsWith("-") && (await isValidBranchName(name, cwd));
-}
-
-function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repoPath }, (err) =>
-      resolve(!err),
-    );
-  });
 }
 
 /** How messages the agent never ran are shown to the user, in the task's error. */
@@ -251,7 +257,7 @@ export class TaskRunner {
     const task = store.insertTask({
       repoId: repo.id,
       repoPath: repo.path,
-      title: input.title?.trim() || titleFrom(input.prompt),
+      title: normalizeTitle(input.title ?? "") || titleFrom(input.prompt),
       prompt: input.prompt,
       agent: input.agent,
       status: "queued",
@@ -269,6 +275,8 @@ export class TaskRunner {
       portBase: null,
       pendingMessage: null,
       discardedAt: null,
+      discardedTip: null,
+      envFiles: [],
     });
     this.publish({ kind: "task.updated", task: toTask(task) });
     this.schedule();
@@ -428,15 +436,29 @@ export class TaskRunner {
       if (now.getTime() - Date.parse(task.discardedAt) <= DISCARDED_BRANCH_TTL_MS) continue;
       if (task.branch?.startsWith(BRANCH_PREFIX)) {
         const branch = task.branch;
+        let kept: string | null = null;
         try {
-          await this.withRepoLock(task.repoId, () => deleteBranch(task.repoPath, branch));
+          kept = await this.withRepoLock(task.repoId, async () => {
+            const tip = await branchTip(task.repoPath, branch);
+            // Commits made on the branch after the discard are someone's work again: keep them.
+            // (Tasks discarded before the tip was recorded have none to compare.)
+            if (tip !== null && task.discardedTip !== null && tip !== task.discardedTip) {
+              return (
+                `${branch} moved since the discard (${task.discardedTip.slice(0, 7)} → ${tip.slice(0, 7)}), ` +
+                `so it is kept; delete it by hand once it is no longer needed`
+              );
+            }
+            await deleteBranch(task.repoPath, branch);
+            return null;
+          });
         } catch (e) {
           // Already gone (deleted by hand) is fine. Otherwise the task says why, and the next
           // sweep tries again.
-          if (await localBranchExists(task.repoPath, branch)) {
-            this.transition(task.id, "cancelled", { error: SWEEP_ERROR + gitMessage(e) });
-            continue;
-          }
+          if ((await branchTip(task.repoPath, branch)) !== null) kept = gitMessage(e);
+        }
+        if (kept !== null) {
+          this.transition(task.id, "cancelled", { error: SWEEP_ERROR + kept });
+          continue;
         }
       }
       this.transition(task.id, "cleaned_up", task.error?.startsWith(SWEEP_ERROR) ? { error: null } : {});
@@ -554,7 +576,10 @@ export class TaskRunner {
       // Recorded right away so a later failure or restart still knows where the work is.
       store.updateTask(task.id, { branch, baseBranch, worktreePath });
       // On a retry the user may have fixed an env file in the worktree: keep theirs.
-      await copyEnvFiles(repo.path, worktreePath, config.envFiles, { skipExisting: retry });
+      const copied = await copyEnvFiles(repo.path, worktreePath, config.envFiles, { skipExisting: retry });
+      // Stored, so every later commit (after a restart too) leaves them out.
+      const known = store.getTask(task.id)?.envFiles ?? [];
+      store.updateTask(task.id, { envFiles: [...new Set([...known, ...copied])] });
       const portBase = store.allocatePortBase(task.id, config.ports.start, config.ports.blockSize);
       const commands = config.setup ?? (await detectSetupCommands(worktreePath));
       const result = await runCommands(commands, {
@@ -734,6 +759,7 @@ export class TaskRunner {
       branch: task.branch as string,
       message: `${task.title} (turn ${turn})`,
       trailers: this.trailers(task),
+      exclude: task.envFiles,
       env: this.deps.gitEnv,
     });
   }
@@ -827,6 +853,8 @@ export class TaskRunner {
           // newer than the last counted turn.
           const turn = task.status === "needs_input" && !this.live.has(taskId) ? task.turns : task.turns + 1;
           await this.commitWork(task, Math.max(turn, 1));
+          // The env copies were never committed; unchanged ones would only block the removal.
+          await removeEnvCopies(task.repoPath, worktreePath, task.envFiles);
           await this.withRepoLock(task.repoId, () => removeWorktree(task.repoPath, worktreePath));
         } else {
           // Deleted by hand: nothing on disk to commit or lose; git only has to forget this one.
@@ -844,10 +872,13 @@ export class TaskRunner {
         throw new RunnerError("conflict", error);
       }
     }
+    // The sweep deletes the branch only if it still points here (spec §6: never lose work).
+    const discardedTip = branch === null ? null : await branchTip(task.repoPath, branch);
     return this.transition(taskId, "cancelled", {
       worktreePath: null,
       pendingMessage: null,
       discardedAt: new Date().toISOString(),
+      discardedTip,
       ...(unsent ? { error: joinNotes(this.get(taskId).error, unsent) } : {}),
     });
   }

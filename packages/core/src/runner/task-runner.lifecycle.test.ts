@@ -841,6 +841,33 @@ describe("TaskRunner lifecycle", () => {
     expect(store.getTask(task.id)).toMatchObject({ status: "cleaned_up", error: null });
   });
 
+  it("a sweep keeps a discarded branch that moved after the discard, and says why", async () => {
+    const { repo, store, runner, create } = await setup([edit("a.txt"), done]);
+    const task = await create({ title: "Old" });
+    await runner.idle();
+    await runner.discard(task.id);
+    const tip = git(repo.path, "rev-parse", "agent/old").trim();
+    expect(store.getTask(task.id)!.discardedTip).toBe(tip);
+    // Someone picks the work up again after the discard.
+    const elsewhere = join(dirname(repo.path), "elsewhere");
+    git(repo.path, "worktree", "add", elsewhere, "agent/old");
+    await writeFile(join(elsewhere, "more.txt"), "more\n");
+    execFileSync("git", ["add", "-A"], { cwd: elsewhere });
+    execFileSync("git", ["commit", "-m", "more"], { cwd: elsewhere, env: { ...process.env, ...repo.env } });
+    git(repo.path, "worktree", "remove", elsewhere);
+    const now = new Date(Date.now() + 15 * DAY);
+
+    expect(await runner.sweepDiscardedBranches(now)).toBe(0);
+
+    expect(git(repo.path, "branch", "--list", "agent/old")).toContain("agent/old");
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("cancelled");
+    expect(t.error).toMatch(/^branch cleanup failed: .*agent\/old.*moved/);
+    // It stays kept on later sweeps too.
+    expect(await runner.sweepDiscardedBranches(now)).toBe(0);
+    expect(git(repo.path, "branch", "--list", "agent/old")).toContain("agent/old");
+  });
+
   it("actions in the wrong status are conflicts", async () => {
     const { store, runner, create } = await setup([done], { maxConcurrent: 1 });
     const task = await create();
