@@ -14,17 +14,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/websocket": "11.3.4",
     "@coord/local-daemon": "workspace:*",
     "@coord/protocol": "workspace:*",
+    "@coord/task-store": "workspace:*",
+    "@fastify/websocket": "11.3.4",
     "fastify": "5.12.7",
     "tsx": "4.23.15",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^24",
     "@coord/client": "workspace:*",
     "@coord/tsconfig": "workspace:*",
+    "@types/node": "^24",
     "typescript": "~6.0.3"
   },
   "nx": {

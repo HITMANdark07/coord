@@ -364,6 +364,9 @@ importers:
       '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@coord/task-store':
+        specifier: workspace:*
+        version: link:../task-store
       '@fastify/websocket':
         specifier: 11.3.4
         version: 11.3.4
