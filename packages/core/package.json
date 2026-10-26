@@ -14,9 +14,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@coord/adapter-claude-code": "workspace:*",
     "@coord/local-daemon": "workspace:*",
     "@coord/protocol": "workspace:*",
     "@coord/task-store": "workspace:*",
+    "@coord/worktree-manager": "workspace:*",
     "@fastify/websocket": "11.3.4",
     "fastify": "5.12.7",
     "tsx": "4.23.15",

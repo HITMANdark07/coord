@@ -358,6 +358,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@coord/adapter-claude-code':
+        specifier: workspace:*
+        version: link:../adapter-claude-code
       '@coord/local-daemon':
         specifier: workspace:*
         version: link:../local-daemon
@@ -367,6 +370,9 @@ importers:
       '@coord/task-store':
         specifier: workspace:*
         version: link:../task-store
+      '@coord/worktree-manager':
+        specifier: workspace:*
+        version: link:../worktree-manager
       '@fastify/websocket':
         specifier: 11.3.4
         version: 11.3.4
