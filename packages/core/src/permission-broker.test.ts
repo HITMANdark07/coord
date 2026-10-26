@@ -103,7 +103,7 @@ describe("PermissionBroker", () => {
   });
 
   it("answers a stored pending request with no waiter (after restart)", () => {
-    const { store, events, changes } = setup();
+    const { store, changes } = setup();
     store.savePermission({
       id: "old",
       taskId: "t9",
@@ -113,14 +113,30 @@ describe("PermissionBroker", () => {
       canRemember: false,
       createdAt: new Date().toISOString(),
     });
+    const bus = new EventBus();
+    const events: DaemonEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+    const broker = new PermissionBroker({ store, bus, onPendingChange: (t, n) => changes.push([t, n]) });
+    expect(broker.answer("old", { allow: true })).toBe("ok");
+    expect(store.listPendingPermissions()).toEqual([]);
+    expect(events.map((e) => e.payload)).toEqual([
+      { kind: "permission.resolved", requestId: "old", taskId: "t9", outcome: "allowed" },
+    ]);
+    expect(changes.at(-1)).toEqual(["t9", 0]);
+  });
+
+  it("still resolves the agent's promise when onPendingChange throws", async () => {
+    const store = openStore(":memory:");
+    let calls = 0;
     const broker = new PermissionBroker({
       store,
       bus: new EventBus(),
-      onPendingChange: (t, n) => changes.push([t, n]),
+      onPendingChange: () => {
+        if (++calls === 2) throw new Error("boom");
+      },
     });
-    expect(broker.answer("old", { allow: true })).toBe("ok");
-    expect(store.listPendingPermissions()).toEqual([]);
-    expect(events).toEqual([]);
-    expect(changes.at(-1)).toEqual(["t9", 0]);
+    const p = broker.request("t1", req, new AbortController().signal);
+    expect(() => broker.answer(broker.pending()[0]!.id, { allow: true })).toThrow("boom");
+    expect(await p).toEqual({ allow: true });
   });
 });

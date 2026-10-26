@@ -71,10 +71,15 @@ export class PermissionBroker {
     this.waiters.delete(id);
     this.resolved.add(id);
     waiter.cleanup();
-    this.deps.store.resolvePermission(id, outcome);
-    this.deps.bus.publish({ kind: "permission.resolved", requestId: id, taskId: waiter.taskId, outcome });
-    this.changed(waiter.taskId);
-    waiter.resolve(decision);
+    try {
+      this.deps.store.resolvePermission(id, outcome);
+      this.deps.bus.publish({ kind: "permission.resolved", requestId: id, taskId: waiter.taskId, outcome });
+      this.changed(waiter.taskId);
+    } finally {
+      // A throwing subscriber or onPendingChange must not leave the agent waiting forever.
+      // The error still propagates to the caller after the promise is settled.
+      waiter.resolve(decision);
+    }
     return true;
   }
 
