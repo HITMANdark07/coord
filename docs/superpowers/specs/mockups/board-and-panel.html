@@ -1,0 +1,110 @@
+<h2>Board home + task panel — does this match how you'd work?</h2>
+<p class="subtitle">
+  The board (your pick) stays visible; clicking a card slides in a panel from the right. Shown in two states.
+  Click either if it looks right, then tell me in the terminal what's wrong or missing.
+</p>
+
+<div class="mockup" style="margin-bottom: 16px">
+  <div class="mockup-header">
+    Board — my-app ▾ &nbsp;·&nbsp;
+    <span style="opacity: 0.7">2 running · 1 needs you · 1 in review</span> &nbsp;&nbsp;
+    <button class="mock-button" style="font-size: 11px">+ New task</button>
+  </div>
+  <div class="mockup-body" style="display: flex; gap: 6px; font-size: 11px; min-height: 120px">
+    <div style="flex: 1">
+      <div class="label">Queued</div>
+      <div class="placeholder" style="padding: 6px; opacity: 0.7">
+        Update deps<br /><span>Claude · waiting for a slot</span>
+      </div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Running</div>
+      <div class="placeholder" style="padding: 6px">
+        Add dark mode<br /><span style="opacity: 0.6">Claude · 4 min · $0.21</span>
+      </div>
+      <div class="placeholder" style="padding: 6px; margin-top: 4px">
+        Refactor auth<br /><span style="opacity: 0.6">Codex · 9 min · 41k tok</span>
+      </div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Needs you</div>
+      <div class="placeholder" style="padding: 6px; background: #fef3c7; outline: 2px solid #f59e0b">
+        ⚠ Fix login redirect<br /><span style="opacity: 0.7">Codex · pnpm add zod?</span>
+      </div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Review</div>
+      <div class="placeholder" style="padding: 6px">
+        ✓ CSV export<br /><span style="opacity: 0.6">+84 −12 · checks ✓</span>
+      </div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">PR open</div>
+      <div class="placeholder" style="padding: 6px">
+        Settings page<br /><span style="opacity: 0.6">#12 · waiting on GitHub</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card" data-choice="panel-live" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Panel · Fix login redirect · <b>Live</b> · Diff · Checks</div>
+        <div class="mockup-body" style="font-size: 11px; line-height: 1.7">
+          <div style="opacity: 0.7">Codex · gpt model · branch agent/fix-login-redirect · 3 commits</div>
+          <div>▸ Read <code>src/auth/redirect.ts</code></div>
+          <div>▸ Edited <code>src/auth/redirect.ts</code> (+12 −3)</div>
+          <div>▸ Ran <code>pnpm test auth</code> — 2 failed</div>
+          <div style="background: #fef3c7; padding: 6px; border-radius: 6px; margin: 6px 0">
+            <b>Codex wants to run:</b> <code>pnpm add zod</code><br />
+            <button class="mock-button" style="font-size: 11px">Allow</button>
+            <button class="mock-button" style="font-size: 11px">Always allow this session</button>
+            <button class="mock-button" style="font-size: 11px">Deny</button>
+          </div>
+          <div style="display: flex; gap: 4px">
+            <input
+              class="mock-input"
+              style="flex: 1"
+              placeholder="Message the agent (it continues the same session)…"
+            /><button class="mock-button" style="font-size: 11px">Interrupt</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>While it works</h3>
+      <p>Live stream of what the agent does; permission prompts inline; message or interrupt it.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="panel-review" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Panel · CSV export · Live · <b>Diff</b> · Checks</div>
+        <div class="mockup-body" style="font-size: 11px; line-height: 1.6">
+          <div style="opacity: 0.7">Claude Code · 5 files · +84 −12 · base main (up to date)</div>
+          <div class="placeholder" style="text-align: left; padding: 6px; font-family: monospace">
+            src/reports/export.ts<br />
+            <span style="color: #16a34a">+ export function toCsv(rows: Report[]) {</span><br />
+            <span style="color: #16a34a">+ …</span><br />
+            <span style="color: #dc2626">- // TODO: export</span>
+          </div>
+          <div style="margin: 6px 0">
+            Checks: ✓ test &nbsp; ✓ lint &nbsp; ✓ typecheck &nbsp; ✓ neatcode rules
+          </div>
+          <div style="display: flex; gap: 4px">
+            <button class="mock-button" style="font-size: 11px">Open PR</button>
+            <button class="mock-button" style="font-size: 11px">Send back with feedback…</button>
+            <button class="mock-button" style="font-size: 11px">Discard</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>When it's done</h3>
+      <p>Full diff against the base branch, check results, then Open PR, send feedback, or discard.</p>
+    </div>
+  </div>
+</div>

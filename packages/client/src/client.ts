@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AddRepoInput,
+  AgentInfo,
   CreateTaskInput,
   DaemonEvent,
   DiffView,
@@ -9,7 +10,9 @@ import {
   PermissionDecision,
   PermissionRequestView,
   Repo,
+  RepoConfigView,
   Task,
+  UpdateRepoInput,
 } from "@coord/protocol";
 import { httpTransport, type ConnectionStatus, type Transport } from "./transport";
 
@@ -68,6 +71,17 @@ export function createClient(transport: Transport = httpTransport()) {
     health: async () => Health.parse(await get("/health")),
     listRepos: async () => z.array(Repo).parse(await get("/repos")),
     addRepo: async (path: string) => Repo.parse(await post("/repos", AddRepoInput.parse({ path }))),
+    updateRepo: async (repoId: string, input: UpdateRepoInput) =>
+      Repo.parse(
+        await transport.request({
+          method: "PATCH",
+          path: `/repos/${seg(repoId)}`,
+          body: UpdateRepoInput.parse(input),
+        }),
+      ),
+    /** The config a new task in this repo would use, read from its base branch. */
+    repoConfig: async (repoId: string) => RepoConfigView.parse(await get(`/repos/${seg(repoId)}/config`)),
+    listAgents: async () => z.array(AgentInfo).parse(await get("/agents")),
     listTasks: async (filter: { repoId?: string; all?: boolean } = {}) =>
       tasks.parse(await get(`/tasks${query({ repoId: filter.repoId, all: filter.all ? "1" : undefined })}`)),
     getTask: async (id: string) => Task.parse(await get(`/tasks/${seg(id)}`)),

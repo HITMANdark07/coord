@@ -22,7 +22,12 @@ const STATUS: Record<string, File["status"]> = {
   T: "modified",
 };
 
-export async function diffAgainstBase(opts: { cwd: string; baseRef: string }): Promise<DiffView> {
+export async function diffAgainstBase(opts: {
+  cwd: string;
+  baseRef: string;
+  /** Paths (relative to `cwd`) left out entirely: the env files Coord copied in hold secrets. */
+  exclude?: string[];
+}): Promise<DiffView> {
   // Intent-to-add makes new untracked files show up in the diff, but doing it in the real
   // index would break the agent's `git stash` and make deleted files look like changes.
   // So work on a private copy of the index.
@@ -34,21 +39,29 @@ export async function diffAgainstBase(opts: { cwd: string; baseRef: string }): P
   try {
     const tmpIndex = join(dir, "index");
     await copyFile(indexPath, tmpIndex);
-    return await diffWithIndex(opts.cwd, opts.baseRef, { GIT_INDEX_FILE: tmpIndex });
+    const paths = ["--", ".", ...(opts.exclude ?? []).map((f) => `:(exclude,literal)${f}`)];
+    return await diffWithIndex(opts.cwd, opts.baseRef, paths, { GIT_INDEX_FILE: tmpIndex });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 }
 
-async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, string>): Promise<DiffView> {
+async function diffWithIndex(
+  cwd: string,
+  baseRef: string,
+  paths: string[],
+  env: Record<string, string>,
+): Promise<DiffView> {
   // --end-of-options: the base ref is derived from a client's branch name.
   const base = (await git(["merge-base", "--end-of-options", baseRef, "HEAD"], { cwd, env })).trim();
-  await git(["add", "--intent-to-add", "-A"], { cwd, env });
+  await git(["add", "--intent-to-add", "-A", ...paths], { cwd, env });
 
-  const nameStatus = (await git(["diff", ...PLAIN, "--name-status", "-z", "-M", base], { cwd, env })).split(
-    "\0",
-  );
-  const numstat = (await git(["diff", ...PLAIN, "--numstat", "-z", "-M", base], { cwd, env })).split("\0");
+  const nameStatus = (
+    await git(["diff", ...PLAIN, "--name-status", "-z", "-M", base, ...paths], { cwd, env })
+  ).split("\0");
+  const numstat = (
+    await git(["diff", ...PLAIN, "--numstat", "-z", "-M", base, ...paths], { cwd, env })
+  ).split("\0");
 
   const counts = new Map<string, { additions: number; deletions: number }>();
   for (let i = 0; i < numstat.length; i++) {
@@ -81,7 +94,7 @@ async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, s
   let patch: string;
   let truncated = false;
   try {
-    patch = await git(["diff", ...PLAIN, "-M", base], { cwd, env, maxBuffer: PATCH_CAP + 1 });
+    patch = await git(["diff", ...PLAIN, "-M", base, ...paths], { cwd, env, maxBuffer: PATCH_CAP + 1 });
   } catch (e) {
     const partial = (e as { stdout?: string }).stdout;
     if (partial === undefined || partial.length === 0) throw e;

@@ -1,0 +1,98 @@
+<h2>Board with Merged + the "New task" form</h2>
+<p class="subtitle">
+  Top: your board with the Merged column added. Bottom: what opens when you click "+ New task". Tell me in the
+  terminal what's wrong or missing.
+</p>
+
+<div class="mockup" style="margin-bottom: 16px">
+  <div class="mockup-header">
+    Board — my-app ▾ &nbsp;·&nbsp;
+    <span style="opacity: 0.7">2 running · 1 needs you · 1 in review</span> &nbsp;&nbsp;
+    <button class="mock-button" style="font-size: 11px">+ New task</button>
+  </div>
+  <div class="mockup-body" style="display: flex; gap: 6px; font-size: 11px; min-height: 110px">
+    <div style="flex: 1">
+      <div class="label">Queued</div>
+      <div class="placeholder" style="padding: 6px; opacity: 0.7">Update deps<br /><span>Claude</span></div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Running</div>
+      <div class="placeholder" style="padding: 6px">
+        Add dark mode<br /><span style="opacity: 0.6">Claude · $0.21</span>
+      </div>
+      <div class="placeholder" style="padding: 6px; margin-top: 4px">
+        Refactor auth<br /><span style="opacity: 0.6">Codex · 41k tok</span>
+      </div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Needs you</div>
+      <div class="placeholder" style="padding: 6px; background: #fef3c7">⚠ Fix login redirect</div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">Review</div>
+      <div class="placeholder" style="padding: 6px">✓ CSV export</div>
+    </div>
+    <div style="flex: 1">
+      <div class="label">PR open</div>
+      <div class="placeholder" style="padding: 6px">
+        Settings page<br /><span style="opacity: 0.6">#12</span>
+      </div>
+    </div>
+    <div style="flex: 1; background: rgba(16, 185, 129, 0.08); border-radius: 6px; padding: 2px">
+      <div class="label">Merged</div>
+      <div class="placeholder" style="padding: 6px">
+        Onboarding copy<br /><span style="opacity: 0.6">#11 · today</span>
+      </div>
+      <div class="placeholder" style="padding: 6px; margin-top: 4px">
+        Fix flaky test<br /><span style="opacity: 0.6">#10 · yesterday</span>
+      </div>
+      <div style="opacity: 0.6; margin-top: 4px">History · show closed</div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">New task</div>
+  <div class="mockup-body" style="font-size: 12px; line-height: 1.9; max-width: 560px">
+    <div>
+      <span class="label">Repo</span><br /><input
+        class="mock-input"
+        style="width: 95%"
+        value="my-app  (~/code/my-app · base: main)"
+      />
+    </div>
+    <div>
+      <span class="label">What should the agent do?</span><br />
+      <div class="placeholder" style="text-align: left; padding: 8px; min-height: 60px">
+        Add CSV export to the reports page. Use the existing table data, add a "Download CSV" button, and
+        cover it with tests.
+      </div>
+    </div>
+    <div style="display: flex; gap: 10px">
+      <div style="flex: 1">
+        <span class="label">Agent</span><br /><button class="mock-button" style="font-size: 11px">
+          ● Claude Code
+        </button>
+        <button class="mock-button" style="font-size: 11px; opacity: 0.6">Codex</button>
+      </div>
+      <div style="flex: 1">
+        <span class="label">Model</span><br /><input
+          class="mock-input"
+          style="width: 90%"
+          value="default (from your agent settings)"
+        />
+      </div>
+    </div>
+    <div>
+      <span class="label">Branch</span><br /><input
+        class="mock-input"
+        style="width: 95%"
+        value="agent/add-csv-export  (from main)"
+      />
+    </div>
+    <div style="opacity: 0.7">▸ Advanced: permission mode · base branch · setup script</div>
+    <div style="margin-top: 8px">
+      <button class="mock-button">Start task</button> <span style="opacity: 0.6">⌘↵</span>
+    </div>
+  </div>
+</div>

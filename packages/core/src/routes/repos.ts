@@ -1,13 +1,26 @@
 import { stat } from "node:fs/promises";
-import { AddRepoInput, type Repo } from "@coord/protocol";
-import { GitError, isNotARepoError, readRepoInfo } from "@coord/worktree-manager";
+import { AddRepoInput, UpdateRepoInput, type Repo, type RepoConfigView } from "@coord/protocol";
+import {
+  detectSetupCommands,
+  GitError,
+  isNotARepoError,
+  localBaseRef,
+  readRepoInfo,
+} from "@coord/worktree-manager";
 import type { Store } from "@coord/task-store";
 import { RunnerError } from "../runner/errors";
+import { resolveBase, type TaskRunner } from "../runner/task-runner";
 import type { Routes } from "./types";
 
 export const repoRoutes =
-  (store: Store): Routes =>
+  (store: Store, runner: TaskRunner): Routes =>
   async (api) => {
+    const known = (id: string) => {
+      const repo = store.getRepo(id);
+      if (!repo) throw new RunnerError("not_found", `repo ${id} not found`);
+      return repo;
+    };
+
     api.get("/repos", async (): Promise<Repo[]> => store.listRepos());
 
     api.post("/repos", async (req, reply) => {
@@ -38,12 +51,28 @@ export const repoRoutes =
         defaultBranch: info.defaultBranch,
         remoteUrl: info.remoteUrl,
       });
+      runner.repoUpdated(repo);
       return reply.code(201).send(repo);
     });
 
-    api.get<{ Params: { id: string } }>("/repos/:id", async (req) => {
-      const repo = store.getRepo(req.params.id);
-      if (!repo) throw new RunnerError("not_found", `repo ${req.params.id} not found`);
+    api.get<{ Params: { id: string } }>("/repos/:id", async (req): Promise<Repo> => known(req.params.id));
+
+    api.patch<{ Params: { id: string } }>("/repos/:id", async (req): Promise<Repo> => {
+      const { bypassAllowed } = UpdateRepoInput.parse(req.body);
+      const repo = store.setRepoBypass(known(req.params.id).id, bypassAllowed);
+      runner.repoUpdated(repo);
       return repo;
+    });
+
+    api.get<{ Params: { id: string } }>("/repos/:id/config", async (req): Promise<RepoConfigView> => {
+      const repo = known(req.params.id);
+      // Read-only: never fetch here (the New task form loads it while a human waits).
+      const { baseBranch, config } = await resolveBase(repo, null, localBaseRef).catch((e: unknown) => {
+        // A broken config or a missing base branch: the repo's state, which the user can fix.
+        throw new RunnerError("conflict", e instanceof Error ? e.message : String(e));
+      });
+      if (config.setup) return { baseBranch, config, setup: config.setup, setupSource: "config" };
+      // shortcut: detects from the main checkout, not the base ref; read the ref's lockfiles if they differ.
+      return { baseBranch, config, setup: await detectSetupCommands(repo.path), setupSource: "detected" };
     });
   };

@@ -62,6 +62,24 @@ describe("diffAgainstBase", () => {
     expect(d.files).toEqual([{ path: "README.md", status: "modified", additions: 1, deletions: 1 }]);
   });
 
+  it("diff excludes the given paths", async () => {
+    // Coord copies env files into worktrees; a repo that doesn't ignore them must not show them.
+    const { path, env } = await makeTempRepo();
+    await writeFile(join(path, "a.ts"), "one\n");
+    execFileSync("git", ["add", "a.ts"], { cwd: path });
+    execFileSync("git", ["commit", "-m", "a"], { cwd: path, env: { ...process.env, ...env } });
+    await writeFile(join(path, "a.ts"), "two\n");
+    await writeFile(join(path, ".env"), "SECRET=hunter2\n");
+
+    const all = await diffAgainstBase({ cwd: path, baseRef: "main" });
+    expect(all.files.map((f) => f.path).sort()).toEqual([".env", "a.ts"]);
+    const d = await diffAgainstBase({ cwd: path, baseRef: "main", exclude: [".env"] });
+    expect(d.files).toEqual([{ path: "a.ts", status: "modified", additions: 1, deletions: 1 }]);
+    expect(d.patch).toContain("+two");
+    expect(d.patch).not.toContain(".env");
+    expect(d.patch).not.toContain("hunter2");
+  });
+
   it("truncates huge patches", async () => {
     const { path } = await makeTempRepo();
     await writeFile(join(path, "big.txt"), "x".repeat(1_100_000) + "\n");

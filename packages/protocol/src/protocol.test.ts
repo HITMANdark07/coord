@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentEvent,
+  branchSuggestion,
   CreateTaskInput,
   DaemonEvent,
+  displayText,
   isCompatibleProtocol,
+  ReadTaskStatus,
   RepoConfig,
   Task,
   TaskStatus,
+  toolInputSummary,
 } from "./index";
 
 describe("protocol", () => {
@@ -118,5 +122,30 @@ describe("protocol", () => {
       },
     };
     expect(DaemonEvent.parse(event)).toEqual(event);
+  });
+
+  it("old clients read pr_open", () => {
+    expect(ReadTaskStatus.parse("pr_open")).toBe("pr_open");
+  });
+});
+
+describe("display helpers", () => {
+  it("branchSuggestion uses the first non-empty line", () => {
+    expect(branchSuggestion("\n\nAdd CSV export to reports\nmore")).toBe("agent/add-csv-export-to-reports");
+    expect(branchSuggestion("!!!")).toBe("agent/task");
+  });
+
+  it("displayText strips control and format characters but keeps newlines", () => {
+    // ESC sequence, BEL, CR, a C1 CSI, a bidi override and a zero-width space.
+    expect(displayText("a\u001b[2Kb\u0007\r\u009bc\u202ed\u200be\n\tf")).toBe("a[2Kbcde\n\tf");
+  });
+
+  it("toolInputSummary keeps the file name of a long path", () => {
+    const path = `/Users/me/.coord/worktrees/repo/${"deep/".repeat(40)}the-file.ts`;
+    const summary = toolInputSummary("Write", { file_path: path });
+    expect(summary).toHaveLength(120);
+    expect(summary).toMatch(/^\/Users\/me\/.+….+\/deep\/the-file\.ts$/);
+    expect(toolInputSummary("Bash", { command: "ls\u001b[2K\nrm x" })).toBe("ls[2K⏎rm x");
+    expect(toolInputSummary("mcp__x__y", { q: "a".repeat(300) }, 20)).toBe(`{"q":"${"a".repeat(13)}…`);
   });
 });

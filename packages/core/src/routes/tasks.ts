@@ -61,7 +61,12 @@ export const taskRoutes =
       }
       // Read-only: never fetch here (a diff is polled while a human watches).
       const base = task.baseBranch ?? store.getRepo(task.repoId)?.defaultBranch ?? "main";
-      return diffAgainstBase({ cwd: task.worktreePath, baseRef: await localBaseRef(task.repoPath, base) });
+      return diffAgainstBase({
+        cwd: task.worktreePath,
+        baseRef: await localBaseRef(task.repoPath, base),
+        // The env files Coord copied in hold secrets; a repo that doesn't ignore them would show them.
+        exclude: task.envFiles,
+      });
     });
 
     api.post<{ Params: { id: string } }>("/tasks/:id/messages", async (req): Promise<Task> => {
