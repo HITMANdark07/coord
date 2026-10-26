@@ -47,6 +47,25 @@ describe("commitTurn", () => {
     expect(st).toBe("?? .env\n?? app/\n");
   });
 
+  it("leaves out excluded files the agent staged itself", async () => {
+    const { path, env } = await agentRepo();
+    await writeFile(join(path, ".env"), "SECRET=1\n");
+    // `git add .env` from the agent's own shell: the exclude pathspec doesn't undo it.
+    execFileSync("git", ["add", ".env"], { cwd: path });
+    const exclude = [".env"];
+    expect(await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env, exclude })).toEqual({
+      committed: false,
+    });
+    execFileSync("git", ["add", ".env"], { cwd: path });
+    await writeFile(join(path, "a.txt"), "a");
+    const r = await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env, exclude });
+    expect(r.committed).toBe(true);
+    const files = execFileSync("git", ["show", "--name-only", "--format="], { cwd: path, encoding: "utf8" });
+    expect(files.trim()).toBe("a.txt");
+    const st = execFileSync("git", ["status", "--porcelain"], { cwd: path, encoding: "utf8" });
+    expect(st).toBe("?? .env\n");
+  });
+
   it("is a no-op without changes", async () => {
     const { path, env } = await agentRepo();
     expect(await commitTurn({ cwd: path, branch: "agent/t", message: "m", trailers, env })).toEqual({

@@ -46,8 +46,14 @@ export async function commitTurn(opts: {
       ),
     );
   }
-  const excluded = (opts.exclude ?? []).map((f) => `:(exclude,literal)${f}`);
+  const exclude = opts.exclude ?? [];
+  const excluded = exclude.map((f) => `:(exclude,literal)${f}`);
   await git(["add", "-A", "--", ".", ...excluded], { cwd, env });
+  // The exclude only keeps Coord's own `git add` off them: one the agent staged itself is unstaged
+  // here, or the commit would carry its secrets. (`git reset` treats an unborn HEAD as empty.)
+  if (exclude.length > 0) {
+    await git(["reset", "-q", "--", ...exclude.map((f) => `:(literal)${f}`)], { cwd, env });
+  }
   // Staged, not `status`: an excluded file that changed is not a reason to commit.
   if (!(await hasStagedChanges(cwd, env))) return { committed: false };
   const body = opts.trailers.length

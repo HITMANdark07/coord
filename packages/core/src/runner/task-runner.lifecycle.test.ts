@@ -645,6 +645,29 @@ describe("TaskRunner lifecycle", () => {
     expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
   });
 
+  it("a turn commit leaves out a copied env file even when the agent staged it", async () => {
+    const { repo, store, runner, adapter, create, commits } = await setup([
+      edit(".env", "TOKEN=agent\n"),
+      edit("a.txt"),
+      hold,
+      done,
+    ]);
+    await commitConfig(repo, { envFiles: [".env"] });
+    await writeFile(join(repo.path, ".env"), "TOKEN=user\n");
+    const task = await create();
+    const wt = () => store.getTask(task.id)!.worktreePath ?? "/nope";
+    await vi.waitFor(() => expect(existsSync(join(wt(), "a.txt"))).toBe(true));
+    // What the agent's own `git add .env` (or `git add -A`) does.
+    git(wt(), "add", ".env");
+    adapter.release();
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(commits(t.branch!)).toEqual(["Fix it (turn 1)"]);
+    expect(git(repo.path, "ls-tree", "-r", "--name-only", t.branch!)).not.toMatch(/^\.env$/m);
+    expect(await readFile(join(t.worktreePath!, ".env"), "utf8")).toBe("TOKEN=agent\n");
+  });
+
   it("a failed worktree removal keeps the task after committing", async () => {
     const { store, runner, create, commits } = await setup([edit("a.txt"), done]);
     const task = await create();
