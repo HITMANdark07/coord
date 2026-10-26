@@ -22,6 +22,7 @@ import {
   detectSetupCommands,
   forgetWorktree,
   readRepoConfig,
+  readRepoInfo,
   removeWorktree,
   resolveBaseRef,
   runCommands,
@@ -164,6 +165,15 @@ function gitMessage(e: unknown): string {
  * (or failed). Each task gets its own worktree and `agent/` branch; every turn end is committed
  * there, so no work lives only as uncommitted files (spec §6).
  */
+/** Git's top level for a path inside a repo, as `POST /repos` registers it; the path itself if git can't say. */
+async function repoTopLevel(path: string): Promise<string> {
+  try {
+    return (await readRepoInfo(path)).root;
+  } catch {
+    return path; // not a repo: the lookup fails with the "register it" error
+  }
+}
+
 export class TaskRunner {
   private readonly live = new Map<string, Live>();
   /** In-flight setup/run work, for `idle()`. */
@@ -185,7 +195,9 @@ export class TaskRunner {
     const { store } = this.deps;
 
     const repo =
-      input.repoId !== undefined ? store.getRepo(input.repoId) : store.findRepoByPath(input.repoPath ?? "");
+      input.repoId !== undefined
+        ? store.getRepo(input.repoId)
+        : store.findRepoByPath(await repoTopLevel(input.repoPath ?? ""));
     if (!repo) {
       throw new RunnerError(
         "not_found",

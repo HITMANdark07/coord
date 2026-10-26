@@ -21,7 +21,10 @@ pnpm check            # lint, typecheck, test, build every project
 
 pnpm daemon           # start the daemon on http://127.0.0.1:4545
 pnpm coord status       # in another terminal
+pnpm coord repo add     # register the repo in the current directory
 pnpm coord new "Add dark mode"
+pnpm coord watch <id>   # follow the task (any unique id prefix of 4+ characters)
+pnpm coord diff <id>    # see what the agent changed
 pnpm coord ls
 
 pnpm desktop          # Electron app (starts the daemon if it isn't running)

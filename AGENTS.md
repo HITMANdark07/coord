@@ -6,23 +6,23 @@ An app that runs coding agents (Claude Code first) in parallel git worktrees, co
 
 Run all commands from the repo root. pnpm runs scripts with the Node version pinned in `.npmrc` (24 LTS), whatever your system Node is.
 
-| Task                                        | Command                                                                                                                                   |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Install (also after `git worktree add`)     | `pnpm install`                                                                                                                            |
-| **Definition of done**                      | `pnpm check`: lint, typecheck, test and build for every project, a format check, and the neatcode rules (`pnpm conventions`)              |
-| One project                                 | `pnpm exec nx run-many -t lint typecheck test build -p @coord/<name>`                                                                     |
-| Format                                      | `pnpm format`                                                                                                                             |
-| New library package                         | `pnpm exec nx g @coord/workspace-plugin:library <name> --type=<lib\|state\|ui\|adapter\|service> --platform=<any\|node\|react\|dom>`      |
-| Project graph                               | `pnpm graph`                                                                                                                              |
-| Run daemon / desktop / web / mobile / relay | `pnpm daemon`, `pnpm desktop`, `pnpm web`, `pnpm mobile`, `pnpm relay`                                                                    |
-| Daemon and desktop with watch mode          | `pnpm dev`                                                                                                                                |
-| CLI                                         | `pnpm coord status`, `pnpm coord ls`, `pnpm coord new "<prompt>"`, `pnpm coord web` (link that opens the web app connected to the daemon) |
+| Task                                        | Command                                                                                                                                                                                                                                                                |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install (also after `git worktree add`)     | `pnpm install`                                                                                                                                                                                                                                                         |
+| **Definition of done**                      | `pnpm check`: lint, typecheck, test and build for every project, a format check, and the neatcode rules (`pnpm conventions`)                                                                                                                                           |
+| One project                                 | `pnpm exec nx run-many -t lint typecheck test build -p @coord/<name>`                                                                                                                                                                                                  |
+| Format                                      | `pnpm format`                                                                                                                                                                                                                                                          |
+| New library package                         | `pnpm exec nx g @coord/workspace-plugin:library <name> --type=<lib\|state\|ui\|adapter\|service> --platform=<any\|node\|react\|dom>`                                                                                                                                   |
+| Project graph                               | `pnpm graph`                                                                                                                                                                                                                                                           |
+| Run daemon / desktop / web / mobile / relay | `pnpm daemon`, `pnpm desktop`, `pnpm web`, `pnpm mobile`, `pnpm relay`                                                                                                                                                                                                 |
+| Daemon and desktop with watch mode          | `pnpm dev`                                                                                                                                                                                                                                                             |
+| CLI                                         | `pnpm coord status`, `repo add\|ls`, `new "<prompt>"`, `ls [--all]`, `show`, `watch`, `allow`, `deny`, `msg`, `interrupt\|cancel\|discard\|resume`, `diff <id>` (ids: any unique prefix of 4+ characters), `web` (link that opens the web app connected to the daemon) |
 
 A task is not done until `pnpm check` passes. Don't skip, weaken or delete a check to make it pass.
 
 **Never bypass the git hooks.** Don't use `git commit --no-verify`, `git push --no-verify` or `SKIP_SIMPLE_GIT_HOOKS`. If a hook fails because a worktree has no `node_modules`, run `pnpm install` there. Every git worktree of this repo needs its own `pnpm install`.
 
-**Running more than one daemon** (e.g. one per worktree): set `COORD_PORT`. The daemon, CLI, MCP server, desktop app and web dev proxy all read it; the default is 4545. `COORD_HOME` (default `~/.coord`) is where the daemon writes its token file, `daemon-<port>.json`.
+**Running more than one daemon** (e.g. one per worktree): set `COORD_PORT`. The daemon, CLI, MCP server, desktop app and web dev proxy all read it; the default is 4545. `COORD_HOME` (default `~/.coord`) is where the daemon writes its token file, `daemon-<port>.json`, and holds its database and a `daemon.lock`. The lock allows one daemon per `COORD_HOME`, so a second daemon needs both `COORD_PORT` and `COORD_HOME`; without a different `COORD_HOME` it exits with an error naming the daemon that holds the lock.
 
 ## Layout
 
@@ -42,6 +42,8 @@ packages/app-state  React hooks shared by every UI (no DOM, no React Native APIs
 packages/ui-web     React DOM screens shared by desktop and web
 packages/design-tokens  colors, spacing, type: shared by every UI
 packages/core       the daemon (Fastify on 127.0.0.1): HTTP API, /events WebSocket, tasks
+packages/task-store     SQLite store for repos, tasks and events (type:service)
+packages/worktree-manager  git worktrees, branches, commits and diffs for tasks (type:service)
 packages/adapter-claude-code  Claude Agent SDK adapter
 packages/tsconfig   shared tsconfig presets: base, node, react, dom
 tools/workspace-plugin  Nx generators, plus the repo-wide invariants test

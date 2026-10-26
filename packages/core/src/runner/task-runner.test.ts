@@ -97,6 +97,25 @@ async function setup(
 }
 
 describe("TaskRunner", () => {
+  it("registers a task made from a repo subdirectory against the repo's top level", async () => {
+    const { repo, runner, repoRecord } = await setup([editA, done]);
+    const sub = join(repo.path, "src", "deep");
+    await mkdir(sub, { recursive: true });
+    const created = await runner.create({ repoPath: sub, prompt: "Fix it" });
+    await runner.idle();
+    expect(created.repoId).toBe(repoRecord.id);
+  });
+
+  it("tells the user to register a repo that is not registered", async () => {
+    const { runner } = await setup([done]);
+    const other = await makeTempRepo();
+    cleanup.push(dirname(other.path));
+    await expect(runner.create({ repoPath: other.path, prompt: "x" })).rejects.toThrow(/coord repo add/);
+    await expect(runner.create({ repoPath: "/does/not/exist", prompt: "x" })).rejects.toThrow(
+      /coord repo add/,
+    );
+  });
+
   it("happy path: queued → setting_up → running → review with one commit", async () => {
     const { repo, store, runner, create, statuses, events } = await setup([editA, done]);
     const created = await create();
