@@ -50,6 +50,8 @@ export function NewTaskForm({
   const defaultBase = configView?.baseBranch ?? "";
   const base = baseEdit ?? defaultBase;
   const canBypass = surface === "desktop" && repo?.bypassAllowed === true;
+  // A hidden Bypass choice (repo switched, opt-in revoked) must never be sent.
+  const effectiveMode = mode === "bypass" && !canBypass ? "ask" : mode;
   const canSubmit = prompt.trim() !== "" && repo !== undefined;
 
   const create = useAction(async () => {
@@ -58,7 +60,7 @@ export function NewTaskForm({
       repoId: repo.id,
       prompt,
       agent,
-      permissionMode: mode,
+      permissionMode: effectiveMode,
       // Only what the user changed, so the daemon's own defaults (and uniqueBranch) still apply.
       ...(model.trim() ? { model: model.trim() } : {}),
       ...(branch !== suggestion ? { branch } : {}),
@@ -75,9 +77,12 @@ export function NewTaskForm({
     if (canSubmit && !create.pending) void create.run();
   };
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (e.key !== "Enter") return;
+    if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       submit();
+    } else if (e.target instanceof HTMLInputElement) {
+      e.preventDefault(); // a stray Enter in a single-line field must not start a task
     }
   };
 
@@ -105,7 +110,11 @@ export function NewTaskForm({
         <select
           style={wide}
           value={repo?.id ?? ""}
-          onChange={(e) => (setChosenRepo(e.target.value), setBaseEdit(null))}
+          onChange={(e) => {
+            setChosenRepo(e.target.value);
+            setBaseEdit(null);
+            setMode("ask");
+          }}
         >
           {list.map((r) => (
             <option key={r.id} value={r.id}>
@@ -160,7 +169,7 @@ export function NewTaskForm({
           style={wide}
           value={branch}
           onChange={(e) => {
-            setBranchEdit(e.target.value);
+            setBranchEdit(e.target.value === "" ? null : e.target.value);
             setBranchError(null);
           }}
         />
@@ -179,14 +188,19 @@ export function NewTaskForm({
           <fieldset style={{ ...field, border: 0, padding: 0 }}>
             <legend>Permission mode</legend>
             <label>
-              <input type="radio" name="mode" checked={mode === "ask"} onChange={() => setMode("ask")} />
+              <input
+                type="radio"
+                name="mode"
+                checked={effectiveMode === "ask"}
+                onChange={() => setMode("ask")}
+              />
               Ask (default)
             </label>{" "}
             <label>
               <input
                 type="radio"
                 name="mode"
-                checked={mode === "accept_edits"}
+                checked={effectiveMode === "accept_edits"}
                 onChange={() => setMode("accept_edits")}
               />
               Auto-accept edits
@@ -198,7 +212,7 @@ export function NewTaskForm({
                   <input
                     type="radio"
                     name="mode"
-                    checked={mode === "bypass"}
+                    checked={effectiveMode === "bypass"}
                     onChange={() => setMode("bypass")}
                   />
                   Bypass
@@ -213,7 +227,8 @@ export function NewTaskForm({
           </label>
           {configView && (
             <div>
-              Setup script (from {configView.setupSource === "config" ? "`.coord/config.json`" : "detected"})
+              Setup script (from{" "}
+              {configView.setupSource === "config" ? <code>.coord/config.json</code> : "detected"})
               <ul style={{ margin: `${space.xs}px 0` }}>
                 {configView.setup.map((cmd) => (
                   <li key={cmd}>
@@ -221,7 +236,9 @@ export function NewTaskForm({
                   </li>
                 ))}
               </ul>
-              <span style={{ color: c.muted }}>Change it in `.coord/config.json` on the base branch.</span>
+              <span style={{ color: c.muted }}>
+                Change it in <code>.coord/config.json</code> on the base branch.
+              </span>
             </div>
           )}
         </div>

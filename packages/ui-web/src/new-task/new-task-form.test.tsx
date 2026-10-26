@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -64,7 +64,7 @@ function setup({
     </ClientProvider>,
   );
   const posts = () => transport.requests.filter((r) => r.method === "POST" && r.path === "/tasks");
-  return { onCreated, posts };
+  return { onCreated, posts, transport };
 }
 
 const type = (label: string, value: string) =>
@@ -207,5 +207,72 @@ describe("NewTaskForm", () => {
     expect(screen.getByText("pnpm install")).toBeTruthy();
     expect(screen.getByText(/detected/)).toBeTruthy();
     expect(screen.getByText(/Change it in/)).toBeTruthy();
+  });
+
+  it("never sends a stale bypass after switching to a repo that is not opted in", async () => {
+    const { posts } = setup({ repos: [repo("a", { bypassAllowed: true }), repo("b")] });
+    await screen.findByText("/code/a · base main");
+    fireEvent.click(screen.getByText(/Advanced/));
+    fireEvent.click(screen.getByLabelText("Bypass"));
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "b" } });
+    prompt("Add CSV export");
+    fireEvent.click(screen.getByText("Start task"));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]?.body).toMatchObject({ repoId: "b", permissionMode: "ask" });
+  });
+
+  it("never sends bypass once the repo's opt-in is revoked", async () => {
+    const a = repo("a", { bypassAllowed: true });
+    const repos = [a];
+    const { posts, transport } = setup({ repos });
+    await screen.findByText("/code/a · base main");
+    fireEvent.click(screen.getByText(/Advanced/));
+    fireEvent.click(screen.getByLabelText("Bypass"));
+    repos[0] = { ...a, bypassAllowed: false }; // what the refetch after the event returns
+    act(() =>
+      transport.emit({
+        seq: 1,
+        at: "x",
+        payload: { kind: "repo.updated", repo: { ...a, bypassAllowed: false } },
+      } as never),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Bypass")).toBeNull());
+    prompt("Add CSV export");
+    fireEvent.click(screen.getByText("Start task"));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]?.body).toMatchObject({ permissionMode: "ask" });
+  });
+
+  it("a cleared branch follows the prompt again", async () => {
+    setup();
+    const branch = screen.getByLabelText<HTMLInputElement>("Branch");
+    type("Branch", "agent/mine");
+    type("Branch", "");
+    prompt("Add CSV export");
+    expect(branch.value).toBe("agent/add-csv-export");
+  });
+
+  it("plain Enter in a single-line input does not start a task", async () => {
+    const { posts } = setup();
+    await screen.findByText("/code/a · base main");
+    prompt("Add CSV export");
+    // jsdom has no implicit submission, so assert its trigger: the keydown default is prevented.
+    expect(fireEvent.keyDown(screen.getByLabelText("Model"), { key: "Enter" })).toBe(false);
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("a failed create keeps the prompt", async () => {
+    setup({
+      onRequest: (r) => {
+        if (r.method === "POST") throw new Error("boom");
+      },
+    });
+    await screen.findByText("/code/a · base main");
+    prompt("Add CSV export");
+    fireEvent.click(screen.getByText("Start task"));
+    await screen.findByText("boom");
+    expect(screen.getByLabelText<HTMLTextAreaElement>("What should the agent do?").value).toBe(
+      "Add CSV export",
+    );
   });
 });
