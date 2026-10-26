@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +22,12 @@ const DAY = 24 * 60 * 60 * 1000;
 const done: FakeStep = { event: { type: "done" } };
 const session: FakeStep = { event: { type: "session", sessionId: "s-1" } };
 const waitForMessage: FakeStep = { waitForMessage: true };
+/** A message turn that talks first, then edits: it shows whether a dropped message still ran. */
+const orphanTurn = (m: string): FakeStep[] => [
+  { event: { type: "text", text: `received: ${m}` } },
+  { edit: { file: "orphan.txt", content: "should never be written\n" } },
+  { event: { type: "done" } },
+];
 const edit = (file: string, content = `${file} from the agent\n`): FakeStep => ({ edit: { file, content } });
 const permission: PermissionRequest = {
   toolUseId: "tu-1",
@@ -94,7 +100,8 @@ function boot(
 async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<string, string> } = {}) {
   const repo = await makeTempRepo();
   cleanup.push(dirname(repo.path));
-  const home = await mkdtemp(join(tmpdir(), "coord-runner-home-"));
+  // Real path: git reports worktree paths resolved (macOS tmpdir() sits behind a symlink).
+  const home = await realpath(await mkdtemp(join(tmpdir(), "coord-runner-home-")));
   cleanup.push(home);
   const store = openStore(":memory:");
   const env = { store, home, gitEnv: opts.gitEnv ?? repo.env };
@@ -161,12 +168,10 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("interrupt with a queued live message ends at the current turn", async () => {
-    const { store, broker, runner, adapter, create, events, commits } = await setup([
-      edit("a.txt"),
-      waitForMessage,
-      { permission },
-      done,
-    ]);
+    const { store, broker, runner, adapter, create, events, commits } = await setup(
+      [edit("a.txt"), waitForMessage, { permission }, done],
+      { fake: { messageTurn: orphanTurn } },
+    );
     const task = await create();
     await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
     await runner.message(task.id, "more");
@@ -184,6 +189,34 @@ describe("TaskRunner lifecycle", () => {
       e.payload.kind === "agent.event" && e.payload.event.type === "text" ? [e.payload.event.text] : [],
     );
     expect(texts).not.toContain("received: more");
+    // The agent had already read the message; only killing the run keeps that turn from running
+    // in a worktree that is now in review.
+    await adapter.settled();
+    expect(existsSync(join(t.worktreePath!, "orphan.txt"))).toBe(false);
+    expect(git(t.worktreePath!, "status", "--porcelain")).toBe("");
+    // The dropped message is shown, not lost silently.
+    expect(store.getTask(task.id)!.error).toBe('Not sent: "more"');
+  });
+
+  it("cancel with a queued live message leaves no orphan edits", async () => {
+    const { repo, store, broker, runner, adapter, create } = await setup(
+      [edit("a.txt"), waitForMessage, { permission }, done],
+      { fake: { messageTurn: orphanTurn } },
+    );
+    const task = await create();
+    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
+    await runner.message(task.id, "more");
+    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
+    const before = store.getTask(task.id)!;
+
+    const t = await runner.cancel(task.id);
+    await adapter.settled();
+
+    expect(t.status).toBe("cancelled");
+    expect(t.error).toBe('Not sent: "more"');
+    expect(existsSync(before.worktreePath!)).toBe(false);
+    expect(git(repo.path, "ls-tree", "--name-only", before.branch!)).not.toContain("orphan.txt");
+    expect(git(repo.path, "show", `${before.branch}:a.txt`)).toBe("a.txt from the agent\n");
   });
 
   it("a message the session refuses waits for the turn end and resumes with it", async () => {
@@ -610,6 +643,28 @@ describe("TaskRunner lifecycle", () => {
     expect(t.status).toBe("cancelled");
     expect(git(repo.path, "worktree", "list")).not.toContain(before.worktreePath!);
     expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
+  });
+
+  it("discard fails loudly when the worktree can't be checked, and prunes nothing", async () => {
+    const { repo, store, runner, create } = await setup([edit("a.txt"), done]);
+    const task = await create();
+    await runner.idle();
+    const before = store.getTask(task.id)!;
+    // stat() of the worktree fails with EACCES, not ENOENT: that is not "deleted by hand".
+    const parent = dirname(before.worktreePath!);
+    await chmod(parent, 0o000);
+    try {
+      await expect(runner.discard(task.id)).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      await chmod(parent, 0o755);
+    }
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("review");
+    // The stat itself fails the discard, before anything tries to forget the worktree.
+    expect(t.error).toMatch(/^discard failed: EACCES: permission denied, stat '/);
+    expect(git(repo.path, "worktree", "list")).toContain(before.worktreePath!);
+    expect(existsSync(join(before.worktreePath!, "a.txt"))).toBe(true);
   });
 
   it("a failed cancel of a queued follow-up keeps its text in the error", async () => {

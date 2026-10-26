@@ -1,5 +1,5 @@
-import { access, copyFile, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize } from "node:path";
+import { access, copyFile, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { GitError, git } from "./git";
 
 async function exists(path: string): Promise<boolean> {
@@ -74,9 +74,47 @@ export async function removeWorktree(repoPath: string, worktreePath: string): Pr
   await git(["worktree", "remove", worktreePath], { cwd: repoPath });
 }
 
-/** Drops git's record of worktrees whose directory no longer exists. Branches are untouched. */
-export async function pruneWorktrees(repoPath: string): Promise<void> {
-  await git(["worktree", "prune"], { cwd: repoPath });
+/** The real path of `path`, which may not exist: its nearest existing ancestor is resolved. */
+async function realpathMissing(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (e) {
+    const parent = dirname(path);
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT" || parent === path) throw e;
+    return join(await realpathMissing(parent), basename(path));
+  }
+}
+
+/**
+ * Drops git's record of one worktree whose directory is gone (deleted by hand). Unlike
+ * `git worktree prune`, the user's other worktrees are left alone, missing or not. The branch
+ * stays; a locked worktree is refused, as `git worktree prune` would keep it too.
+ */
+export async function forgetWorktree(repoPath: string, worktreePath: string): Promise<void> {
+  const common = resolve(repoPath, (await git(["rev-parse", "--git-common-dir"], { cwd: repoPath })).trim());
+  const admin = join(common, "worktrees");
+  // git records the real path of the worktree's .git file.
+  const targets = new Set([resolve(worktreePath), await realpathMissing(resolve(worktreePath))]);
+  let entries: string[];
+  try {
+    entries = await readdir(admin);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw e;
+  }
+  for (const name of entries) {
+    let gitdir: string;
+    try {
+      gitdir = (await readFile(join(admin, name, "gitdir"), "utf8")).trim();
+    } catch {
+      continue;
+    }
+    if (!targets.has(dirname(gitdir))) continue;
+    if (await exists(join(admin, name, "locked"))) {
+      throw new Error(`worktree ${worktreePath} is locked; unlock it with \`git worktree unlock\``);
+    }
+    await rm(join(admin, name), { recursive: true, force: true });
+  }
 }
 
 export async function deleteBranch(repoPath: string, branch: string): Promise<void> {

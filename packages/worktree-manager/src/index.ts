@@ -6,7 +6,7 @@ export {
   copyEnvFiles,
   createWorktree,
   deleteBranch,
-  pruneWorktrees,
+  forgetWorktree,
   removeWorktree,
   uniqueBranch,
 } from "./worktree";

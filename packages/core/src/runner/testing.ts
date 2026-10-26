@@ -25,6 +25,8 @@ export type FakeAdapter = AgentAdapter & {
     /** Messages delivered with `send()` while a run was live. */
     send: string[];
   };
+  /** Resolves once every agent process this fake started has finished. */
+  settled(): Promise<void>;
 };
 
 const isTurnEnd = (s: FakeStep) => "event" in s && (s.event.type === "done" || s.event.type === "error");
@@ -56,22 +58,27 @@ export interface FakeAdapterOptions {
  * plays the session's next turn (the first one for a session this fake never saw), and an
  * immediate `done` once the script is used up.
  *
- * Like the real adapter, every message accepted by `send()` is its own turn: once the current
- * turn's `done` is out, the fake plays one turn per queued message (see `messageTurn`), then
- * waits for more until `end()`.
+ * Each run is an agent process, like the real one:
+ * - It runs on its own. While the runner reads `events` it waits for each event to be read
+ *   before going on, which keeps tests deterministic. Once the runner stops reading, it goes on
+ *   anyway, as a real agent process does.
+ * - Every message accepted by `send()` is its own turn (see `messageTurn`), played after the
+ *   current turn ends. Messages accepted before `end()` still play after it, since the real
+ *   agent has already read them (adapter-claude-code's message queue). Only an abort stops them.
  *
  * - `edit` writes into `ctx.cwd`; `permission` awaits `ctx.requestPermission` and then emits a
  *   `tool_result` with the decision; `waitForMessage` holds the turn until a message has
  *   arrived (the message still plays as its own turn afterwards).
  * - `interrupt()` ends the current turn with `done` ("interrupted"), like the real adapter; an
- *   aborted `ctx.signal` ends the run with `error`; `end()` ends the event stream once the agent
- *   is idle.
+ *   aborted `ctx.signal` ends the run with `error`; `end()` stops the turn in progress (if any)
+ *   and ends the run once the queued messages have played.
  */
 export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): FakeAdapter {
   const turns = toTurns(script);
   // sessionId -> index of the turn the next resume plays.
   const nextTurn = new Map<string, number>();
   const calls: FakeAdapter["calls"] = { start: [], resume: [], send: [] };
+  const processes: Promise<void>[] = [];
   const messageTurn =
     opts.messageTurn ??
     ((message: string): FakeStep[] => [
@@ -83,73 +90,125 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
     const firstTurn = turns[turnIndex] ?? [{ event: { type: "done" } }];
     // Messages accepted by send() whose turn hasn't started yet.
     const inbox: string[] = [];
-    // Per turn: an interrupt stops only the turn it lands in.
+    // Events emitted but not read yet, and how far the reader has asked.
+    const out: AgentEvent[] = [];
+    let emitted = 0;
+    let requested = 0;
+    let detached = false;
+    let finished = false;
+    // Per turn: an interrupt (or end()) stops only the turn it lands in.
     let stop = new AbortController();
+    let inTurn = false;
     let interrupted = false;
+    let cut = false;
     let ended = false;
-    let wake: (() => void) | undefined;
-    const poke = () => {
-      const w = wake;
-      wake = undefined;
-      w?.();
+
+    // Every wait re-checks its condition whenever any of the state above changes.
+    const waiters = new Set<() => void>();
+    const changed = () => {
+      for (const check of [...waiters]) check();
     };
-    ctx.signal.addEventListener("abort", poke, { once: true });
-    const settled = () => ended || interrupted || ctx.signal.aborted;
-    const waitFor = (ready: () => boolean) =>
+    const until = (ready: () => boolean) =>
       new Promise<void>((resolve) => {
-        if (ready()) return resolve();
-        wake = resolve;
+        const check = () => {
+          if (!ready()) return;
+          waiters.delete(check);
+          resolve();
+        };
+        waiters.add(check);
+        check();
       });
+    ctx.signal.addEventListener("abort", changed);
+    const settled = () => cut || interrupted || ctx.signal.aborted;
+
+    /** Hands an event to the reader and waits until it asks for the next one (or stopped reading). */
+    async function emit(event: AgentEvent): Promise<void> {
+      out.push(event);
+      const index = emitted++;
+      changed();
+      await until(() => requested > index + 1 || detached || ctx.signal.aborted);
+    }
 
     /** Plays one turn. Returns true when it ended with `done` and the session goes on. */
-    async function* playTurn(steps: FakeStep[]): AsyncGenerator<AgentEvent, boolean> {
+    async function runTurn(steps: FakeStep[]): Promise<boolean> {
       stop = new AbortController();
       interrupted = false;
-      for (const step of steps) {
-        if (settled()) break;
-        if ("event" in step) {
-          if (step.event.type === "session") nextTurn.set(step.event.sessionId, turnIndex + 1);
-          yield step.event;
-          if (isTurnEnd(step)) return step.event.type === "done";
-        } else if ("edit" in step) {
-          const file = join(ctx.cwd, step.edit.file);
-          await mkdir(dirname(file), { recursive: true });
-          await writeFile(file, step.edit.content);
-        } else if ("permission" in step) {
-          const signal = AbortSignal.any([ctx.signal, stop.signal]);
-          const decision = await ctx.requestPermission(step.permission, signal);
-          if (!settled())
-            yield { type: "tool_result", toolUseId: step.permission.toolUseId, ok: decision.allow };
-        } else {
-          await waitFor(() => inbox.length > 0 || settled());
+      cut = false;
+      inTurn = true;
+      try {
+        for (const step of steps) {
+          if (settled()) break;
+          if ("event" in step) {
+            if (step.event.type === "session") nextTurn.set(step.event.sessionId, turnIndex + 1);
+            if (isTurnEnd(step)) {
+              inTurn = false;
+              await emit(step.event);
+              return step.event.type === "done";
+            }
+            await emit(step.event);
+          } else if ("edit" in step) {
+            const file = join(ctx.cwd, step.edit.file);
+            await mkdir(dirname(file), { recursive: true });
+            await writeFile(file, step.edit.content);
+          } else if ("permission" in step) {
+            const signal = AbortSignal.any([ctx.signal, stop.signal]);
+            const decision = await ctx.requestPermission(step.permission, signal);
+            if (!settled())
+              await emit({ type: "tool_result", toolUseId: step.permission.toolUseId, ok: decision.allow });
+          } else {
+            await until(() => inbox.length > 0 || settled() || ended);
+          }
         }
-      }
-      // Reached when the turn was cut short, or the script ran out without ending the turn.
-      if (ctx.signal.aborted) {
-        yield { type: "error", message: "aborted" };
+        // Reached when the turn was cut short, or the script ran out without ending the turn.
+        inTurn = false;
+        if (ctx.signal.aborted) {
+          await emit({ type: "error", message: "aborted" });
+          return false;
+        }
+        if (interrupted) {
+          await emit({ type: "done", summary: "interrupted" });
+          return true;
+        }
         return false;
+      } finally {
+        inTurn = false;
       }
-      if (interrupted) {
-        yield { type: "done", summary: "interrupted" };
-        return true;
-      }
-      return false;
     }
+
+    const agent = (async () => {
+      try {
+        if (!(await runTurn(firstTurn))) return;
+        for (;;) {
+          await until(() => inbox.length > 0 || ended || ctx.signal.aborted);
+          if (ctx.signal.aborted) {
+            await emit({ type: "error", message: "aborted" });
+            return;
+          }
+          const message = inbox.shift();
+          if (message === undefined) return;
+          if (!(await runTurn(messageTurn(message)))) return;
+        }
+      } finally {
+        finished = true;
+        ctx.signal.removeEventListener("abort", changed);
+        changed();
+      }
+    })();
+    processes.push(agent);
 
     async function* events(): AsyncGenerator<AgentEvent> {
       try {
-        if (!(yield* playTurn(firstTurn))) return;
         for (;;) {
-          await waitFor(() => inbox.length > 0 || ended || ctx.signal.aborted);
-          const message = inbox.shift();
-          if (message === undefined) {
-            if (ctx.signal.aborted) yield { type: "error", message: "aborted" };
-            return;
-          }
-          if (!(yield* playTurn(messageTurn(message)))) return;
+          requested++;
+          changed();
+          await until(() => out.length > 0 || finished);
+          const event = out.shift();
+          if (event === undefined) return;
+          yield event;
         }
       } finally {
-        ctx.signal.removeEventListener("abort", poke);
+        detached = true;
+        changed();
       }
     }
 
@@ -159,19 +218,22 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
         if (ended || opts.refuseSends) return false;
         calls.send.push(message);
         inbox.push(message);
-        poke();
+        changed();
         return true;
       },
       async interrupt() {
         if (opts.hangInterrupt) return new Promise<void>(() => undefined);
         interrupted = true;
         stop.abort();
-        poke();
+        changed();
       },
       end() {
         ended = true;
-        stop.abort();
-        poke();
+        if (inTurn) {
+          cut = true;
+          stop.abort();
+        }
+        changed();
       },
     };
   }
@@ -180,6 +242,9 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
     id: opts.id ?? "claude-code",
     capabilities: { resume: true, permissionCallback: true, costReporting: true, liveMessages: true },
     calls,
+    settled: async () => {
+      await Promise.all(processes);
+    },
     start(task, ctx) {
       calls.start.push(task);
       return play(0, ctx);

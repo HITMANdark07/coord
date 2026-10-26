@@ -11,7 +11,7 @@ import {
   createWorktree,
   deleteBranch,
   detectSetupCommands,
-  pruneWorktrees,
+  forgetWorktree,
   readRepoConfig,
   readRepoInfo,
   removeWorktree,
@@ -174,14 +174,35 @@ describe("worktrees", () => {
     expect(git(path, env, "branch", "--list", "agent/r")).toBe("");
   });
 
-  it("pruneWorktrees forgets a worktree whose directory is gone, keeping its branch", async () => {
+  it("forgetWorktree drops only this worktree's record, keeping its branch", async () => {
+    const { path, env } = await makeTempRepo();
+    // Not realpath'd: on macOS tmpdir() is behind a symlink, and git records the real path.
+    const root = await tmp();
+    const a = join(root, "a");
+    const b = join(root, "b");
+    await createWorktree({ repoPath: path, worktreePath: a, branch: "agent/a", baseRef: "main" });
+    await createWorktree({ repoPath: path, worktreePath: b, branch: "agent/b", baseRef: "main" });
+    await rm(a, { recursive: true, force: true });
+    await rm(b, { recursive: true, force: true });
+    const listed = () => git(path, env, "worktree", "list", "--porcelain");
+
+    await forgetWorktree(path, a);
+
+    expect(listed()).not.toMatch(/\/a\n/);
+    // Another worktree whose directory is also missing keeps its record.
+    expect(listed()).toMatch(/\/b\n/);
+    expect(git(path, env, "branch", "--list", "agent/a")).toContain("agent/a");
+    // Nothing left to forget: a no-op.
+    await forgetWorktree(path, a);
+  });
+
+  it("forgetWorktree refuses a locked worktree", async () => {
     const { path, env } = await makeTempRepo();
     const wt = join(await tmp(), "wt");
-    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/p", baseRef: "main" });
+    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/l", baseRef: "main" });
+    git(path, env, "worktree", "lock", wt);
     await rm(wt, { recursive: true, force: true });
-    expect(git(path, env, "worktree", "list")).toContain(wt);
-    await pruneWorktrees(path);
-    expect(git(path, env, "worktree", "list")).not.toContain(wt);
-    expect(git(path, env, "branch", "--list", "agent/p")).toContain("agent/p");
+    await expect(forgetWorktree(path, wt)).rejects.toThrow(/locked/);
+    expect(git(path, env, "worktree", "list", "--porcelain")).toMatch(/\/wt\n/);
   });
 });

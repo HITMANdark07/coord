@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CreateTaskInput,
@@ -20,7 +20,7 @@ import {
   createWorktree,
   deleteBranch,
   detectSetupCommands,
-  pruneWorktrees,
+  forgetWorktree,
   readRepoConfig,
   removeWorktree,
   resolveBaseRef,
@@ -105,6 +105,10 @@ interface Live {
    * agent runs each accepted message as its own turn. The task reaches review only at zero.
    */
   outstanding: number;
+  /** Texts of accepted messages whose turn hasn't started yet, oldest first. */
+  queued: string[];
+  /** Accepted messages that never ran as a turn here; set when the run's last turn ends. */
+  dropped: string[];
   /** Resolves once start() is done with the task: the turn ended (or setup stopped) and live is gone. */
   finished: Promise<void>;
 }
@@ -137,6 +141,16 @@ function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
       resolve(!err),
     );
   });
+}
+
+/** How messages the agent never ran are shown to the user, in the task's error. */
+function notSent(texts: string[]): string {
+  return texts.length === 0 ? "" : `Not sent: ${texts.map((t) => JSON.stringify(t)).join(", ")}`;
+}
+
+/** Joins error notes into one `error` value; null when there are none. */
+function joinNotes(...notes: string[]): string | null {
+  return notes.filter((n) => n.length > 0).join(" ") || null;
 }
 
 /** Git's own message when it has one: it says what to fix (identity, signing, a locked worktree). */
@@ -254,6 +268,7 @@ export class TaskRunner {
         return this.message(taskId, text);
       }
       live.outstanding++;
+      live.queued.push(text);
       return task;
     }
     if (this.isResting(task)) return this.followUp(task, text);
@@ -268,8 +283,9 @@ export class TaskRunner {
     if (!live || !run || (task.status !== "running" && task.status !== "needs_input")) {
       throw new RunnerError("conflict", `task is ${task.status}; there is no turn to interrupt`);
     }
-    // The user asked to stop, so the turn in progress is the last one. Messages queued with
-    // send() never run: that turn's end calls run.end(), which drops the session's queued input.
+    // The user asked to stop, so the turn in progress is the last one. The agent has already read
+    // any message queued with send() and would run it as one more turn even after run.end(), so
+    // that turn's end kills the run instead and shows those messages as not sent (endTurn).
     live.outstanding = 1;
     const stopping = run.interrupt();
     // An agent waiting on a prompt gets no answer now; clients drop the prompt.
@@ -300,10 +316,7 @@ export class TaskRunner {
     if (task.status === "queued" && task.worktreePath === null) {
       return this.transition(taskId, "cancelled", { pendingMessage: null });
     }
-    return this.close(taskId, async () => {
-      await this.stop(taskId);
-      return this.discardWork(taskId);
-    });
+    return this.close(taskId, async () => this.discardWork(taskId, await this.stop(taskId)));
   }
 
   /**
@@ -317,7 +330,7 @@ export class TaskRunner {
     if (!this.isResting(task)) {
       throw new RunnerError("conflict", `task is ${task.status}; only a task at rest can be discarded`);
     }
-    return this.close(taskId, () => this.discardWork(taskId));
+    return this.close(taskId, () => this.discardWork(taskId, []));
   }
 
   /**
@@ -401,6 +414,8 @@ export class TaskRunner {
       abort: new AbortController(),
       finished: new Promise((r) => (finish = r)),
       outstanding: 1,
+      queued: [],
+      dropped: [],
     };
     this.live.set(task.id, live);
     try {
@@ -537,12 +552,18 @@ export class TaskRunner {
           // A message sent during the turn runs as the next turn of the same run (see
           // `outstanding`); each turn gets its own commit as it ends (spec §6).
           if (--live.outstanding > 0) {
+            // The next turn is the oldest queued message's.
+            live.queued.shift();
             await this.commitMidRun(taskId);
             break;
           }
-          return this.endTurn(taskId, live, run);
+          // Awaited inside the loop: leaving it closes `events`, which must wait until endTurn
+          // has committed and, if needed, killed the run.
+          await this.endTurn(taskId, live, run);
+          return;
         case "error":
-          return this.endTurn(taskId, live, run, event.message);
+          await this.endTurn(taskId, live, run, event.message);
+          return;
       }
     }
     await this.endTurn(taskId, live, run, "agent stopped without finishing the turn");
@@ -555,6 +576,9 @@ export class TaskRunner {
    */
   private async endTurn(taskId: string, live: Live, run: AgentRun, failure?: string): Promise<void> {
     live.ending = true;
+    // Messages still queued now will never run here: an interrupt or cancel made this turn the
+    // last, or an error ended the run early.
+    live.dropped.push(...live.queued.splice(0));
     const task = this.deps.store.getTask(taskId);
     if (!task) return;
     const turns = task.turns + 1;
@@ -564,6 +588,11 @@ export class TaskRunner {
     } catch (e) {
       commitError = gitMessage(e);
     } finally {
+      // run.end() only closes the agent's input: messages it has already read still run as
+      // turns, in a worktree that is now in review or being discarded. So when messages were
+      // dropped, or a cancel is closing the task, kill the run, after this turn's commit so its
+      // work is kept. Otherwise the agent finishes gracefully.
+      if (live.dropped.length > 0 || this.closing.has(taskId)) live.abort.abort();
       run.end();
     }
     if (this.live.get(taskId) === live) this.live.delete(taskId);
@@ -571,17 +600,22 @@ export class TaskRunner {
     this.deps.broker.withdrawAll(taskId);
 
     if (this.closing.has(taskId)) {
-      // This turn ended because of a cancel, which sets the status once it has discarded.
+      // This turn ended because of a cancel, which sets the status (and reports dropped
+      // messages) once it has discarded.
       this.deps.store.updateTask(taskId, { turns });
       return;
     }
+    const unsent = notSent(live.dropped);
     if (commitError !== undefined) {
       const after = failure ? ` (after agent error: ${failure})` : "";
-      this.transition(taskId, "needs_input", { turns, error: `commit failed: ${commitError}${after}` });
+      this.transition(taskId, "needs_input", {
+        turns,
+        error: joinNotes(`commit failed: ${commitError}${after}`, unsent),
+      });
     } else if (failure !== undefined) {
-      this.transition(taskId, "failed", { turns, error: failure });
+      this.transition(taskId, "failed", { turns, error: joinNotes(failure, unsent) });
     } else {
-      this.transition(taskId, "review", { turns, error: null });
+      this.transition(taskId, "review", { turns, error: joinNotes(unsent) });
     }
   }
 
@@ -646,12 +680,16 @@ export class TaskRunner {
     return p;
   }
 
-  /** Stops the task's agent or setup and waits until start() is done with it. */
-  private async stop(taskId: string): Promise<void> {
+  /**
+   * Stops the task's agent or setup and waits until start() is done with it. Returns the sent
+   * messages that never ran.
+   */
+  private async stop(taskId: string): Promise<string[]> {
     const live = this.live.get(taskId);
-    if (!live) return;
+    if (!live) return [];
     if (live.run) {
       const run = live.run;
+      // As for interrupt(): this turn is the last, and endTurn drops what is queued behind it.
       live.outstanding = 1;
       this.deps.broker.withdrawAll(taskId);
       // The interrupt ends the turn the normal way, so endTurn commits what the agent left.
@@ -670,33 +708,45 @@ export class TaskRunner {
       live.abort.abort();
     }
     await live.finished;
+    return live.dropped;
   }
 
   /**
    * Commit, then remove the worktree (no --force), then cancelled. Any failure leaves the
    * worktree and its work in place: the task rests with the error and the caller gets a conflict.
    */
-  private async discardWork(taskId: string): Promise<TaskRecord> {
+  private async discardWork(taskId: string, dropped: string[]): Promise<TaskRecord> {
     const task = this.get(taskId);
     const { worktreePath, branch } = task;
+    // Messages that will never run: dropped by the cancel, or a queued follow-up. The user sees them.
+    const unsent = notSent([...dropped, ...(task.pendingMessage === null ? [] : [task.pendingMessage])]);
     if (worktreePath !== null && branch !== null) {
       try {
-        if (existsSync(worktreePath)) {
+        // Only a directory that is really gone counts as deleted by hand; any other stat error
+        // (permissions, say) fails the discard below.
+        const missing = await stat(worktreePath).then(
+          () => false,
+          (e: NodeJS.ErrnoException) => {
+            if (e.code === "ENOENT") return true;
+            throw e;
+          },
+        );
+        if (!missing) {
           // A task parked by a failed commit retries that turn's commit; otherwise the work is
           // newer than the last counted turn.
           const turn = task.status === "needs_input" && !this.live.has(taskId) ? task.turns : task.turns + 1;
           await this.commitWork(task, Math.max(turn, 1));
           await this.withRepoLock(task.repoId, () => removeWorktree(task.repoPath, worktreePath));
         } else {
-          // Deleted by hand: nothing on disk to commit or lose; git only has to forget it.
-          await this.withRepoLock(task.repoId, () => pruneWorktrees(task.repoPath));
+          // Deleted by hand: nothing on disk to commit or lose; git only has to forget this one.
+          await this.withRepoLock(task.repoId, () => forgetWorktree(task.repoPath, worktreePath));
         }
       } catch (e) {
         const current = this.get(taskId);
-        // A queued follow-up won't run now; keep its text where the user sees it.
-        const unsent =
-          current.pendingMessage === null ? "" : ` Unsent follow-up: "${current.pendingMessage}"`;
-        const error = `discard failed: ${gitMessage(e)}. The work is still in ${worktreePath}.${unsent}`;
+        const error = joinNotes(
+          `discard failed: ${gitMessage(e)}. The work is still in ${worktreePath}.`,
+          unsent,
+        ) as string;
         // A cancel can fail from a working status; failed is the resting state that says so.
         const rest = RESTING_STATUSES.includes(current.status as TaskStatus) ? current.status : "failed";
         this.transition(taskId, rest as TaskStatus, { error, pendingMessage: null });
@@ -707,6 +757,7 @@ export class TaskRunner {
       worktreePath: null,
       pendingMessage: null,
       discardedAt: new Date().toISOString(),
+      ...(unsent ? { error: unsent } : {}),
     });
   }
 
