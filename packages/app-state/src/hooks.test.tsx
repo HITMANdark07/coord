@@ -11,6 +11,7 @@ import {
   usePermissions,
   useTask,
   useTaskEvents,
+  type TaskEventsState,
   useTasks,
 } from "./index";
 
@@ -265,5 +266,110 @@ describe("app-state hooks", () => {
       wrapper: wrapperFor(createClient(transport)),
     });
     await waitFor(() => expect(transport.requests[0]?.path).toBe("/tasks?repoId=r1&all=1"));
+  });
+
+  it("a changed id or filter never shows the previous data", async () => {
+    const transport = fakeTransport((req) => ({ ...task, id: req.path.split("/")[2] ?? "" }));
+    const { result, rerender } = renderHook(({ id }: { id: string | null }) => useTask(id), {
+      wrapper: wrapperFor(createClient(transport)),
+      initialProps: { id: "a" as string | null },
+    });
+    await waitFor(() => expect(result.current).toMatchObject({ status: "ok", data: { id: "a" } }));
+
+    const seen: unknown[] = [];
+    const { result: r2, rerender: rerender2 } = renderHook(
+      ({ id }: { id: string | null }) => {
+        const v = useTask(id);
+        seen.push(v);
+        return v;
+      },
+      { wrapper: wrapperFor(createClient(transport)), initialProps: { id: "a" as string | null } },
+    );
+    await waitFor(() => expect(r2.current).toMatchObject({ status: "ok" }));
+    seen.length = 0;
+    rerender2({ id: "b" });
+    expect(seen[0]).toEqual({ status: "loading" }); // the very first render after the change
+    await waitFor(() => expect(r2.current).toMatchObject({ status: "ok", data: { id: "b" } }));
+
+    rerender({ id: null });
+    expect(result.current).toBeNull();
+    rerender({ id: "b" });
+    expect(result.current).toEqual({ status: "loading" });
+  });
+
+  it("useTaskEvents never shows the previous task's events after the id changes", async () => {
+    const transport = fakeTransport((req) => [
+      {
+        seq: 1,
+        at: task.createdAt,
+        payload: { kind: "agent.event", taskId: req.path.split("/")[2] ?? "", event: { type: "done" } },
+      },
+    ]);
+    const seen: TaskEventsState[] = [];
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => {
+        const v = useTaskEvents(id);
+        seen.push(v);
+        return v;
+      },
+      { wrapper: wrapperFor(createClient(transport)), initialProps: { id: "a" } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ok"));
+    seen.length = 0;
+    rerender({ id: "b" });
+    expect(seen[0]).toEqual({ status: "loading", events: [] });
+  });
+
+  it("useTaskEvents refetches the full history on reopen if the first load failed", async () => {
+    let fail = true;
+    const transport = fakeTransport(
+      () => {
+        if (fail) throw new Error("boom");
+        return [1, 2, 3].map((n) => ({
+          seq: n,
+          at: task.createdAt,
+          payload: { kind: "agent.event" as const, taskId: "t1", event: { type: "done" as const } },
+        }));
+      },
+      { gateEvents: true },
+    );
+    const { result } = renderHook(() => useTaskEvents("t1"), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    act(() => transport.setStatus("open"));
+    act(() =>
+      transport.emit({
+        seq: 3,
+        at: task.createdAt,
+        payload: { kind: "agent.event", taskId: "t1", event: { type: "done" } },
+      }),
+    );
+    fail = false;
+    act(() => transport.setStatus("closed"));
+    act(() => transport.setStatus("open"));
+    await waitFor(() => expect(result.current.events.map((e) => e.seq)).toEqual([1, 2, 3]));
+    expect(transport.requests.at(-1)?.path).toBe("/tasks/t1/events");
+  });
+
+  it("useAction stays pending until every overlapping run finishes", async () => {
+    const finishers: Array<() => void> = [];
+    const { result } = renderHook(() => useAction(() => new Promise<void>((r) => finishers.push(r))));
+    let p1: Promise<unknown> = Promise.resolve();
+    let p2: Promise<unknown> = Promise.resolve();
+    act(() => {
+      p1 = result.current.run();
+      p2 = result.current.run();
+    });
+    await act(async () => {
+      finishers[0]?.();
+      await p1;
+    });
+    expect(result.current.pending).toBe(true);
+    await act(async () => {
+      finishers[1]?.();
+      await p2;
+    });
+    expect(result.current.pending).toBe(false);
   });
 });

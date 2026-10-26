@@ -18,7 +18,12 @@ export function useLiveQuery<T>(
 ): QueryState<T> {
   const { intervalMs, refreshOn } = options;
   const client = useClient();
-  const [state, setState] = useState<QueryState<T>>({ status: "loading" });
+  // Keyed by `load`: when it changes, the previous data is never shown, not even for one render.
+  const [held, setHeld] = useState<{ load: () => Promise<T>; state: QueryState<T> }>({
+    load,
+    state: { status: "loading" },
+  });
+  const state: QueryState<T> = held.load === load ? held.state : { status: "loading" };
 
   useEffect(() => {
     let active = true;
@@ -35,9 +40,14 @@ export function useLiveQuery<T>(
       clearTimeout(timer);
       try {
         const data = await load();
-        if (active) setState({ status: "ok", data });
+        if (active) setHeld({ load, state: { status: "ok", data } });
       } catch (err) {
-        if (active) setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
+        if (active) {
+          setHeld({
+            load,
+            state: { status: "error", error: err instanceof Error ? err.message : String(err) },
+          });
+        }
       }
       inFlight = false;
       if (!active) return;

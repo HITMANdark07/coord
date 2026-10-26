@@ -33,13 +33,23 @@ function isForTask(event: DaemonEvent, taskId: string): boolean {
 /** A task's event history plus live events. After the event connection reopens it fetches what it missed. */
 export function useTaskEvents(taskId: string): TaskEventsState {
   const client = useClient();
-  const [state, setState] = useState<TaskEventsState>({ status: "loading", events: [] });
+  // Keyed by taskId so the first render after the id changes never shows the old task's events.
+  const [held, setHeld] = useState<{ taskId: string; state: TaskEventsState }>({
+    taskId,
+    state: { status: "loading", events: [] },
+  });
+  const state: TaskEventsState = held.taskId === taskId ? held.state : { status: "loading", events: [] };
 
   useEffect(() => {
     let active = true;
     let lastSeq: number | undefined;
     let opens = 0;
-    setState({ status: "loading", events: [] });
+    let historyLoaded = false;
+    const setState = (update: (s: TaskEventsState) => TaskEventsState) =>
+      setHeld((h) => ({
+        taskId,
+        state: update(h.taskId === taskId ? h.state : { status: "loading", events: [] }),
+      }));
 
     const add = (incoming: DaemonEvent[]) => {
       for (const e of incoming) lastSeq = Math.max(lastSeq ?? e.seq, e.seq);
@@ -48,7 +58,9 @@ export function useTaskEvents(taskId: string): TaskEventsState {
     const fetchSince = (sinceSeq?: number) =>
       client.taskEvents(taskId, sinceSeq).then(
         (events) => {
-          if (active) setState((s) => ({ status: "ok", events: merge(s.events, add(events)) }));
+          if (!active) return;
+          if (sinceSeq === undefined) historyLoaded = true;
+          setState((s) => ({ status: "ok", events: merge(s.events, add(events)) }));
         },
         (err: unknown) => {
           if (active) {
@@ -67,8 +79,9 @@ export function useTaskEvents(taskId: string): TaskEventsState {
         if (isForTask(event, taskId)) setState((s) => ({ ...s, events: merge(s.events, add([event])) }));
       },
       onStatus: (status) => {
+        // Until the history has loaded, lastSeq may come from a live event alone, so refetch it all.
         // The first open is the connection the initial load already covers.
-        if (status === "open" && opens++ > 0) void fetchSince(lastSeq);
+        if (status === "open" && opens++ > 0) void fetchSince(historyLoaded ? lastSeq : undefined);
       },
     });
     void fetchSince();
