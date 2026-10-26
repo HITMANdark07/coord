@@ -49,16 +49,16 @@ export function permissionBridge(ctx: RunContext): CanUseTool {
   };
 }
 
-/**
- * SDK options for a run. Caller-supplied `extra` (model, resume) goes first so it can never
- * override the guarantees after it: the worktree cwd, the repo's Claude Code setup, permissions.
- */
 const SDK_PERMISSION_MODE: Record<PermissionMode, NonNullable<Options["permissionMode"]>> = {
   ask: "default",
   accept_edits: "acceptEdits",
   bypass: "bypassPermissions",
 };
 
+/**
+ * SDK options for a run. Caller-supplied `extra` (model, resume) goes first so it can never
+ * override the guarantees after it: the worktree cwd, the repo's Claude Code setup, permissions.
+ */
 export function buildOptions(
   extra: RunOptions & { resume?: string },
   ctx: RunContext,
