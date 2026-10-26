@@ -1,10 +1,18 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import { createClient, type CoordClient } from "@coord/client";
 import { fakeTransport } from "@coord/client/testing";
-import type { Task } from "@coord/protocol";
-import { ClientProvider, useDaemonStatus, useTasks } from "./index";
+import { DaemonError, createClient, type CoordClient } from "@coord/client";
+import type { DaemonEvent, PermissionRequestView, Task } from "@coord/protocol";
+import {
+  ClientProvider,
+  useAction,
+  useDaemonStatus,
+  usePermissions,
+  useTask,
+  useTaskEvents,
+  useTasks,
+} from "./index";
 
 const health = { ok: true, protocolVersion: "0.1.0", daemonVersion: "0.1.0" };
 const task: Task = {
@@ -57,7 +65,9 @@ describe("app-state hooks", () => {
   it("reloads tasks when the daemon pushes a task event", async () => {
     let tasks: Task[] = [];
     const transport = fakeTransport(() => tasks);
-    const { result } = renderHook(() => useTasks(60_000), { wrapper: wrapperFor(createClient(transport)) });
+    const { result } = renderHook(() => useTasks(undefined, 60_000), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
     await waitFor(() => expect(result.current).toEqual({ status: "ok", data: [] }));
 
     tasks = [task];
@@ -69,7 +79,9 @@ describe("app-state hooks", () => {
     // Each load waits until the test resolves it, so ordering is fully controlled.
     const pending: Array<(tasks: Task[]) => void> = [];
     const transport = fakeTransport(() => new Promise<Task[]>((resolve) => pending.push(resolve)));
-    const { result } = renderHook(() => useTasks(60_000), { wrapper: wrapperFor(createClient(transport)) });
+    const { result } = renderHook(() => useTasks(undefined, 60_000), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
     await waitFor(() => expect(pending).toHaveLength(1));
 
     // 20 events arrive while the first load is still running.
@@ -104,7 +116,7 @@ describe("app-state hooks", () => {
 
   it("refetches when the event connection reopens", async () => {
     const transport = fakeTransport(() => []);
-    renderHook(() => useTasks(60_000), { wrapper: wrapperFor(createClient(transport)) });
+    renderHook(() => useTasks(undefined, 60_000), { wrapper: wrapperFor(createClient(transport)) });
     await waitFor(() => expect(transport.requests).toHaveLength(1));
     act(() => transport.setStatus("open"));
     await waitFor(() => expect(transport.requests).toHaveLength(2));
@@ -112,5 +124,146 @@ describe("app-state hooks", () => {
 
   it("requires a ClientProvider", () => {
     expect(() => renderHook(() => useTasks())).toThrow(/ClientProvider/);
+  });
+
+  describe("useTaskEvents", () => {
+    const agentEvent = (seq: number, taskId = "t1"): DaemonEvent => ({
+      seq,
+      at: task.createdAt,
+      payload: { kind: "agent.event", taskId, event: { type: "done" } },
+    });
+    const seqs = (events: DaemonEvent[]) => events.map((e) => e.seq);
+
+    it("merges history and live events in seq order without duplicates", async () => {
+      const transport = fakeTransport(() => [agentEvent(1), agentEvent(2)]);
+      const { result } = renderHook(() => useTaskEvents("t1"), {
+        wrapper: wrapperFor(createClient(transport)),
+      });
+      await waitFor(() => expect(result.current.status).toBe("ok"));
+
+      act(() => {
+        transport.emit(agentEvent(4));
+        transport.emit(agentEvent(3));
+        transport.emit(agentEvent(2)); // already in the history
+        transport.emit(agentEvent(9, "other-task"));
+      });
+      expect(seqs(result.current.events)).toEqual([1, 2, 3, 4]);
+    });
+
+    it("fetches what it missed after the connection reopens", async () => {
+      let stored = 4; // events 1..stored exist on the daemon
+      const transport = fakeTransport(
+        (req) => {
+          const since = Number(new URL(req.path, "http://x").searchParams.get("sinceSeq") ?? 0);
+          return Array.from({ length: stored }, (_, i) => agentEvent(i + 1)).filter((e) => e.seq > since);
+        },
+        { gateEvents: true },
+      );
+      const { result } = renderHook(() => useTaskEvents("t1"), {
+        wrapper: wrapperFor(createClient(transport)),
+      });
+      await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2, 3, 4]));
+      act(() => transport.setStatus("open")); // first open: the initial load covers it
+      act(() => transport.setStatus("closed"));
+
+      stored = 7; // 5-7 happen while disconnected; a closed gated socket delivers none of them
+      for (let n = 5; n <= 7; n++) act(() => transport.emit(agentEvent(n)));
+      expect(seqs(result.current.events)).toEqual([1, 2, 3, 4]);
+
+      act(() => transport.setStatus("open"));
+      await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2, 3, 4, 5, 6, 7]));
+      expect(transport.requests.map((r) => r.path)).toContain("/tasks/t1/events?sinceSeq=4");
+      expect(transport.requests).toHaveLength(2);
+    });
+  });
+
+  it("usePermissions without a task id lists all pending and drops a resolved one", async () => {
+    const perm = (id: string, taskId: string): PermissionRequestView => ({
+      id,
+      taskId,
+      toolUseId: `u-${id}`,
+      tool: "Bash",
+      input: {},
+      canRemember: false,
+      createdAt: task.createdAt,
+    });
+    let pending = [perm("p1", "t1"), perm("p2", "t2")];
+    const transport = fakeTransport(() => pending);
+    const { result } = renderHook(() => usePermissions(undefined, 60_000), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
+    await waitFor(() => expect(result.current).toEqual({ status: "ok", data: pending }));
+    expect(transport.requests[0]?.path).toBe("/permissions");
+
+    pending = [perm("p2", "t2")];
+    act(() =>
+      transport.emit({
+        seq: 1,
+        at: task.createdAt,
+        payload: { kind: "permission.resolved", requestId: "p1", taskId: "t1", outcome: "allowed" },
+      }),
+    );
+    await waitFor(() => expect(result.current).toEqual({ status: "ok", data: pending }));
+  });
+
+  it("useAction records the daemon error and clears it on the next success", async () => {
+    let fail = true;
+    const fn = async (n: number) => {
+      if (fail) throw new DaemonError(409, "conflict", "Already answered");
+      return n * 2;
+    };
+    const { result } = renderHook(() => useAction(fn));
+    let first: number | undefined = 1;
+    await act(async () => {
+      first = await result.current.run(2);
+    });
+    expect(first).toBeUndefined();
+    expect(result.current.error).toBe("Already answered");
+    expect(result.current.pending).toBe(false);
+
+    fail = false;
+    let second: number | undefined;
+    await act(async () => {
+      second = await result.current.run(2);
+    });
+    expect(second).toBe(4);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("useAction is pending while the call runs", async () => {
+    let finish: () => void = () => {};
+    const { result } = renderHook(() => useAction(() => new Promise<void>((r) => (finish = r))));
+    let done: Promise<unknown> = Promise.resolve();
+    act(() => {
+      done = result.current.run();
+    });
+    expect(result.current.pending).toBe(true);
+    await act(async () => {
+      finish();
+      await done;
+    });
+    expect(result.current.pending).toBe(false);
+  });
+
+  it("useTask returns null for a null id and makes no request", async () => {
+    const transport = fakeTransport(() => task);
+    const { result, rerender } = renderHook(({ id }: { id: string | null }) => useTask(id), {
+      wrapper: wrapperFor(createClient(transport)),
+      initialProps: { id: null as string | null },
+    });
+    expect(result.current).toBeNull();
+    expect(transport.requests).toHaveLength(0);
+
+    rerender({ id: "t1" });
+    await waitFor(() => expect(result.current).toEqual({ status: "ok", data: task }));
+    expect(transport.requests).toHaveLength(1);
+  });
+
+  it("useTasks passes its filter to the daemon", async () => {
+    const transport = fakeTransport(() => []);
+    renderHook(() => useTasks({ repoId: "r1", all: true }, 60_000), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
+    await waitFor(() => expect(transport.requests[0]?.path).toBe("/tasks?repoId=r1&all=1"));
   });
 });

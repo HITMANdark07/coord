@@ -1,4 +1,11 @@
 export { ClientProvider, useClient } from "./client-context";
+export { useAction } from "./use-action";
+export { useAgents } from "./use-agents";
 export { useDaemonStatus, type DaemonStatus } from "./use-daemon-status";
 export { useLiveQuery, type QueryState } from "./use-live-query";
+export { usePermissions } from "./use-permissions";
+export { useRepoConfig } from "./use-repo-config";
+export { useRepos } from "./use-repos";
+export { useTask } from "./use-task";
+export { useTaskEvents, type TaskEventsState } from "./use-task-events";
 export { useTasks, type TasksState } from "./use-tasks";

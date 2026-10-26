@@ -71,3 +71,6 @@ export function useLiveQuery<T>(
 
   return state;
 }
+
+/** For hooks whose id may be null: a load that never settles makes no request and never polls. */
+export const idleLoad = () => new Promise<never>(() => {});
