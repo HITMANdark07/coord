@@ -21,7 +21,9 @@ export type GitOptions = {
 
 /**
  * Every git call goes through here: execFile, no shell. Tests pass `env` for a git identity;
- * production passes nothing so the user's own identity and signing config apply.
+ * production passes nothing so the user's own identity and signing config apply. The C locale
+ * keeps git's messages in English, which callers match (`isNotARepoError`) and show; it changes
+ * nothing about identity, signing or file contents.
  */
 export function git(args: string[], opts: GitOptions): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,7 +32,7 @@ export function git(args: string[], opts: GitOptions): Promise<string> {
       args,
       {
         cwd: opts.cwd,
-        env: { ...process.env, ...opts.env },
+        env: { ...process.env, ...opts.env, LC_ALL: "C", LANGUAGE: "C" },
         maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024,
         encoding: "utf8",
       },

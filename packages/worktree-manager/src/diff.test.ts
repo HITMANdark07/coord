@@ -42,6 +42,27 @@ describe("diffAgainstBase", () => {
     expect(d2.files.find((f) => f.path === "committed.txt")).toBeUndefined();
   });
 
+  it("produces a plain a/ b/ patch whatever the repo's diff config says", async () => {
+    const { path } = await makeTempRepo();
+    for (const [key, value] of [
+      ["diff.noprefix", "true"],
+      ["color.diff", "always"],
+      ["color.ui", "always"],
+      ["diff.external", "echo EXTERNAL"],
+      ["diff.upper.textconv", "tr a-z A-Z"],
+    ]) {
+      execFileSync("git", ["config", key, value!], { cwd: path });
+    }
+    await writeFile(join(path, ".git/info/attributes"), "README.md diff=upper\n");
+    await writeFile(join(path, "README.md"), "changed\n");
+    const d = await diffAgainstBase({ cwd: path, baseRef: "main" });
+    expect(d.patch).toContain("diff --git a/README.md b/README.md");
+    expect(d.patch).toContain("+changed");
+    expect(d.patch).not.toContain("\u001b[");
+    expect(d.patch).not.toContain("EXTERNAL");
+    expect(d.files).toEqual([{ path: "README.md", status: "modified", additions: 1, deletions: 1 }]);
+  });
+
   it("truncates huge patches", async () => {
     const { path } = await makeTempRepo();
     await writeFile(join(path, "big.txt"), "x".repeat(1_100_000) + "\n");

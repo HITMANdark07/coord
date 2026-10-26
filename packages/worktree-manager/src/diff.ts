@@ -5,6 +5,11 @@ import { join, resolve } from "node:path";
 import { git } from "./git";
 
 const PATCH_CAP = 1_000_000;
+/**
+ * The diff is parsed and shown to clients, so the user's diff config (an external diff tool,
+ * textconv, colors, no a/ b/ prefixes) must not change its format.
+ */
+const PLAIN = ["--no-ext-diff", "--no-color", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/"];
 
 type File = DiffView["files"][number];
 
@@ -40,8 +45,10 @@ async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, s
   const base = (await git(["merge-base", "--end-of-options", baseRef, "HEAD"], { cwd, env })).trim();
   await git(["add", "--intent-to-add", "-A"], { cwd, env });
 
-  const nameStatus = (await git(["diff", "--name-status", "-z", "-M", base], { cwd, env })).split("\0");
-  const numstat = (await git(["diff", "--numstat", "-z", "-M", base], { cwd, env })).split("\0");
+  const nameStatus = (await git(["diff", ...PLAIN, "--name-status", "-z", "-M", base], { cwd, env })).split(
+    "\0",
+  );
+  const numstat = (await git(["diff", ...PLAIN, "--numstat", "-z", "-M", base], { cwd, env })).split("\0");
 
   const counts = new Map<string, { additions: number; deletions: number }>();
   for (let i = 0; i < numstat.length; i++) {
@@ -74,7 +81,7 @@ async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, s
   let patch: string;
   let truncated = false;
   try {
-    patch = await git(["diff", "-M", base], { cwd, env, maxBuffer: PATCH_CAP + 1 });
+    patch = await git(["diff", ...PLAIN, "-M", base], { cwd, env, maxBuffer: PATCH_CAP + 1 });
   } catch (e) {
     const partial = (e as { stdout?: string }).stdout;
     if (partial === undefined || partial.length === 0) throw e;

@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createToken, localTransport, writeDaemonInfo } from "./index";
 
 /** Records every socket so the test can drop connections and count live ones. */
@@ -29,7 +29,6 @@ class FakeSocket {
   }
 }
 
-const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const live = () => FakeSocket.all.filter((s) => s.open);
 
 describe("localTransport reconnects", () => {
@@ -44,17 +43,15 @@ describe("localTransport reconnects", () => {
       reconnectDelayMs: 5,
       WebSocket: FakeSocket as unknown as typeof WebSocket,
     }).subscribe({ onEvent: (e) => events.push(e) });
-    await tick(10);
-    expect(live()).toHaveLength(1);
+    await vi.waitFor(() => expect(live()).toHaveLength(1));
 
     // The daemon restarts with a new token, and the connection drops.
     const restartedToken = createToken();
     await writeDaemonInfo({ port: 4998, token: restartedToken, pid: 2, protocolVersion: "0.1.0" }, home);
     live()[0]?.drop();
-    await tick(40);
+    await vi.waitFor(() => expect(live()[0]?.protocols).toContain(`coord.token.${restartedToken}`));
 
     expect(live()).toHaveLength(1);
-    expect(live()[0]?.protocols).toContain(`coord.token.${restartedToken}`);
     live()[0]?.onmessage?.({ data: '{"n":1}' });
     expect(events).toEqual([{ n: 1 }]);
 
@@ -69,9 +66,9 @@ describe("localTransport reconnects", () => {
       onEvent: () => {},
       onStatus: (s) => statuses.push(s),
     });
-    await tick(30);
+    // Still retrying: a second attempt reports closed again.
+    await vi.waitFor(() => expect(statuses.length).toBeGreaterThan(1));
     stop();
     expect(statuses[0]).toBe("closed");
-    expect(statuses.length).toBeGreaterThan(1); // still retrying
   });
 });
