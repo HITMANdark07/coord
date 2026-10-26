@@ -121,6 +121,9 @@ export function localTransport(options: LocalTransportOptions = {}): Transport {
             },
           });
         } catch {
+          // No daemon to reach (no info file, or the connection failed): tell the subscriber, as
+          // a dropped socket would, then keep trying.
+          handlers.onStatus?.("closed");
           reconnect();
         }
       };

@@ -12,8 +12,15 @@ import {
   type ErrorCode,
   type Health,
 } from "@coord/protocol";
-import { EventBus } from "./event-bus";
-import { TaskStore } from "./store";
+import type { Store } from "@coord/task-store";
+import { StoreConflictError } from "@coord/task-store";
+import type { EventBus } from "./event-bus";
+import type { PermissionBroker } from "./permission-broker";
+import { permissionRoutes } from "./routes/permissions";
+import { repoRoutes } from "./routes/repos";
+import { taskRoutes } from "./routes/tasks";
+import { RunnerError } from "./runner/errors";
+import type { TaskRunner } from "./runner/task-runner";
 
 export const DAEMON_VERSION = "0.1.0";
 
@@ -72,12 +79,14 @@ export interface ServerOptions {
   token: string;
   /** Exact browser origins that may call the daemon. Requests without an Origin are not browsers. */
   allowedOrigins?: string[];
-  bus?: EventBus;
-  store?: TaskStore;
+  bus: EventBus;
+  store: Store;
+  runner: TaskRunner;
+  broker: PermissionBroker;
 }
 
 export function createServer(options: ServerOptions) {
-  const { token, bus = new EventBus(), store = new TaskStore(bus) } = options;
+  const { token, bus, store, runner, broker } = options;
   const allowedOrigins = new Set(options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS);
 
   const app = Fastify({
@@ -98,6 +107,8 @@ export function createServer(options: ServerOptions) {
   });
 
   app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof RunnerError) return sendError(reply, err.status, err.code, err.message);
+    if (err instanceof StoreConflictError) return sendError(reply, 409, "conflict", err.message);
     if (err instanceof ZodError)
       return sendError(reply, 400, "invalid_request", "invalid request", err.issues);
     const status = (err as { statusCode?: number }).statusCode;
@@ -145,14 +156,9 @@ export function createServer(options: ServerOptions) {
       daemonVersion: DAEMON_VERSION,
     }));
 
-    api.get("/tasks", async () => store.list());
-
-    api.get<{ Params: { id: string } }>("/tasks/:id", async (req, reply) => {
-      const task = store.get(req.params.id);
-      return task ?? sendError(reply, 404, "not_found", `task ${req.params.id} not found`);
-    });
-
-    api.post("/tasks", async (req, reply) => reply.code(201).send(store.create(req.body)));
+    api.register(repoRoutes(store));
+    api.register(taskRoutes(store, runner));
+    api.register(permissionRoutes(broker));
 
     api.get("/events", { websocket: true }, (socket) => {
       const unsubscribe = bus.subscribe((event) => socket.send(JSON.stringify(event)));

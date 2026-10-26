@@ -488,6 +488,8 @@ flowchart LR
     G4 --> P6["Phase 6<br/>Codex / Gemini / Aider<br/>adapters, planner,<br/>containers"]
 ```
 
+**Re-scoped on 2026-10-26.** Phase 1 now covers the full local loop (CLI, desktop board, checks, GitHub PRs) for Claude Code **and** Codex, run from the repo. See [the Phase 1 design](superpowers/specs/2026-10-26-phase-1-design.md). Packaging (installable app, npm CLI) is the next phase, before relay + PWA + mobile.
+
 The durations are estimates for one developer working part-time. Each gate must pass before the next phase starts. Phases 5 and 6 can run in either order.
 
 ---

@@ -9,6 +9,8 @@ export const ErrorCode = z.enum([
   "forbidden",
   "unavailable",
   "internal",
+  /** The action isn't allowed in the task's current status (HTTP 409). */
+  "conflict",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

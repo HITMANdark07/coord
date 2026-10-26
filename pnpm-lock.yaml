@@ -358,12 +358,21 @@ importers:
 
   packages/core:
     dependencies:
+      '@coord/adapter-claude-code':
+        specifier: workspace:*
+        version: link:../adapter-claude-code
       '@coord/local-daemon':
         specifier: workspace:*
         version: link:../local-daemon
       '@coord/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@coord/task-store':
+        specifier: workspace:*
+        version: link:../task-store
+      '@coord/worktree-manager':
+        specifier: workspace:*
+        version: link:../worktree-manager
       '@fastify/websocket':
         specifier: 11.3.4
         version: 11.3.4
@@ -438,6 +447,28 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  packages/task-store:
+    dependencies:
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      better-sqlite3:
+        specifier: 11.10.0
+        version: 11.10.0
+    devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/better-sqlite3':
+        specifier: 9.6.0
+        version: 9.6.0
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   packages/tsconfig: {}
 
   packages/ui-web:
@@ -479,6 +510,22 @@ importers:
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  packages/worktree-manager:
+    dependencies:
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -2999,6 +3046,9 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
+
+  '@types/better-sqlite3@9.6.0':
+    resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -9802,6 +9852,10 @@ snapshots:
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.29.11
+
+  '@types/better-sqlite3@9.6.0':
+    dependencies:
+      '@types/node': 24.19.2
 
   '@types/chai@5.2.3':
     dependencies:

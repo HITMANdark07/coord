@@ -1,10 +1,16 @@
 import type { AgentEvent, PermissionDecision } from "./events";
-import type { AgentId } from "./task";
+import type { AgentId, PermissionMode } from "./task";
 
-export interface TaskSpec {
+export interface RunOptions {
+  model?: string;
+  permissionMode?: PermissionMode;
+  /** Extra environment for the agent process, e.g. COORD_PORT_BASE. */
+  env?: Record<string, string>;
+}
+
+export interface TaskSpec extends RunOptions {
   taskId: string;
   prompt: string;
-  model?: string;
 }
 
 /** What an agent asks permission for; shown on desktop and phone (PRD FR-4, FR-34). */
@@ -56,9 +62,14 @@ export interface AgentAdapter {
     resume: boolean;
     permissionCallback: boolean;
     costReporting: boolean;
-    /** send() and interrupt() work while a turn is running. */
+    /**
+     * send() and interrupt() work while a turn is running. The runner itself only sends between
+     * turns (the Claude Agent SDK folds a mid-turn message into the current turn); this flags what
+     * the agent supports, for a later mid-turn steering feature.
+     */
     liveMessages: boolean;
   };
   start(task: TaskSpec, ctx: RunContext): AgentRun;
-  resume(sessionId: string, message: string, ctx: RunContext): AgentRun;
+  /** `options` re-applies model, permission mode and env, which a resumed session doesn't remember. */
+  resume(sessionId: string, message: string, ctx: RunContext, options?: RunOptions): AgentRun;
 }

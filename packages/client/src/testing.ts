@@ -3,12 +3,17 @@ import type { ConnectionStatus, EventHandlers, Transport, TransportRequest } fro
 
 /**
  * In-memory Transport for tests in any package: answer requests with `handler`, push events
- * with `emit`, simulate reconnects with `setStatus`. Build the client with `createClient(fake)`.
+ * with `emit`, simulate reconnects with `setStatus`. With `gateEvents`, `emit` delivers nothing until
+ * `setStatus("open")`, as a real socket delivers nothing before it opens. Build the client with `createClient(fake)`.
  */
-export function fakeTransport(handler: (req: TransportRequest) => unknown | Promise<unknown>) {
+export function fakeTransport(
+  handler: (req: TransportRequest) => unknown | Promise<unknown>,
+  options: { gateEvents?: boolean } = {},
+) {
   const subscribers = new Set<EventHandlers>();
   const requests: TransportRequest[] = [];
   let subscribeCalls = 0;
+  let open = false;
   const transport = {
     requests,
     get subscribeCalls() {
@@ -24,9 +29,11 @@ export function fakeTransport(handler: (req: TransportRequest) => unknown | Prom
       return () => subscribers.delete(handlers);
     },
     emit(event: DaemonEvent) {
+      if (options.gateEvents && !open) return;
       for (const s of subscribers) s.onEvent(event);
     },
     setStatus(status: ConnectionStatus) {
+      open = status === "open";
       for (const s of subscribers) s.onStatus?.(status);
     },
   } satisfies Transport & Record<string, unknown>;

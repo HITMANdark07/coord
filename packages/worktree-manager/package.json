@@ -1,0 +1,29 @@
+{
+  "name": "@coord/worktree-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coord/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@coord/tsconfig": "workspace:*",
+    "@types/node": "^24",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:service",
+      "platform:node"
+    ]
+  }
+}

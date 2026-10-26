@@ -12,3 +12,6 @@ out/
 .neatcode/skills.candidates.yaml
 .neatcode/skills.local.yaml
 .neatcode/mcp.log
+
+# Brainstorming mockups (visual companion)
+.superpowers/

@@ -9,17 +9,16 @@ import {
   TOKEN_SUBPROTOCOL_PREFIX,
   type DaemonEvent,
 } from "@coord/protocol";
-import { createServer } from "./server";
-
-const TOKEN = "test-token-0123456789-0123456789-abcdef";
-const auth = { [PROTOCOL_HEADER]: PROTOCOL_VERSION, authorization: `Bearer ${TOKEN}` };
+import { auth, TOKEN, testDaemon } from "./test-daemon";
 
 describe("daemon API", () => {
-  let app: ReturnType<typeof createServer>;
-  beforeEach(() => {
-    app = createServer({ token: TOKEN });
+  let d: Awaited<ReturnType<typeof testDaemon>>;
+  let app: Awaited<ReturnType<typeof testDaemon>>["app"];
+  beforeEach(async () => {
+    d = await testDaemon();
+    app = d.app;
   });
-  afterEach(() => app.close());
+  afterEach(() => d.close());
 
   it("reports health without a token or protocol header, even with a query string", async () => {
     for (const url of ["/health", "/health?probe=1"]) {
@@ -30,15 +29,16 @@ describe("daemon API", () => {
   });
 
   it("creates and lists tasks", async () => {
+    await d.call("POST", "/repos", { path: d.repo.path });
     const created = await app.inject({
       method: "POST",
       url: "/tasks",
       headers: auth,
-      payload: { repoPath: "/repo", prompt: "Add dark mode" },
+      payload: { repoPath: d.repo.path, prompt: "Add dark mode" },
     });
     expect(created.statusCode).toBe(201);
     const task = Task.parse(created.json());
-    expect(task.status).toBe("queued");
+    expect(task.title).toBe("Add dark mode");
 
     expect((await app.inject({ method: "GET", url: "/tasks", headers: auth })).json()).toHaveLength(1);
     expect(
@@ -111,16 +111,18 @@ describe("daemon API", () => {
 });
 
 describe("daemon over a real socket", () => {
-  let app: ReturnType<typeof createServer>;
+  let d: Awaited<ReturnType<typeof testDaemon>>;
+  let app: Awaited<ReturnType<typeof testDaemon>>["app"];
   let baseUrl: string;
   let client: CoordClient;
   beforeEach(async () => {
-    app = createServer({ token: TOKEN });
+    d = await testDaemon();
+    app = d.app;
     await app.listen({ host: "127.0.0.1", port: 0 });
     baseUrl = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
     client = createClient(httpTransport({ baseUrl, token: TOKEN }));
   });
-  afterEach(() => app.close());
+  afterEach(() => d.close());
 
   /** Opens a raw WebSocket to /events and reports whether the daemon accepted it. */
   function tryEvents(protocols: string[], headers: Record<string, string> = {}) {
@@ -144,7 +146,9 @@ describe("daemon over a real socket", () => {
         onStatus: (s) => {
           if (s === "open" && !created) {
             created = true;
-            void client.createTask({ repoPath: "/repo", prompt: "Add dark mode" });
+            void client
+              .addRepo(d.repo.path)
+              .then(() => client.createTask({ repoPath: d.repo.path, prompt: "Add dark mode" }));
           }
         },
         onEvent: (event) => {
@@ -154,7 +158,6 @@ describe("daemon over a real socket", () => {
       });
     });
     const event = await received;
-    expect(event.seq).toBe(1);
     expect(event.payload).toMatchObject({ kind: "task.updated", task: { title: "Add dark mode" } });
   });
 

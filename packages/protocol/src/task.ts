@@ -30,25 +30,61 @@ export const AbsolutePath = z
   .string()
   .refine((p) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p), { message: "must be an absolute path" });
 
+/** How an agent's tool calls are approved. `bypass` only works for repos with `bypassAllowed`. */
+export const PermissionMode = z.enum(["ask", "accept_edits", "bypass"]);
+export type PermissionMode = z.infer<typeof PermissionMode>;
+
+// Fields added after 0.1.0 all have defaults so a client reading an older daemon still parses.
 export const Task = z.object({
   id: z.string(),
+  repoId: z.string().default(""),
   repoPath: z.string(),
   title: z.string(),
   prompt: z.string(),
   agent: AgentId.or(z.string()),
   status: ReadTaskStatus,
   branch: z.string().nullable(),
+  baseBranch: z.string().nullable().default(null),
   worktreePath: z.string().nullable(),
   sessionId: z.string().nullable(),
+  model: z.string().nullable().default(null),
+  permissionMode: PermissionMode.default("ask").catch("ask"),
   costUsd: z.number(),
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  turns: z.number().default(0),
+  error: z.string().nullable().default(null),
   createdAt: z.string(),
+  updatedAt: z.string().default(""),
 });
 export type Task = z.infer<typeof Task>;
 
-export const CreateTaskInput = z.object({
-  repoPath: AbsolutePath,
-  prompt: z.string().min(1),
-  title: z.string().optional(),
-  agent: AgentId.default("claude-code"),
-});
+export const CreateTaskInput = z
+  .object({
+    repoId: z.string().optional(),
+    repoPath: AbsolutePath.optional(),
+    prompt: z.string().min(1),
+    title: z.string().optional(),
+    agent: AgentId.default("claude-code"),
+    model: z.string().optional(),
+    // Coord only touches branches under agent/, so it never rewrites the user's own branches.
+    branch: z
+      .string()
+      .regex(/^agent\/[a-z0-9][a-z0-9._/-]*$/)
+      .optional(),
+    // A leading "-" would reach git as an option (`--upload-pack=<cmd>` runs a command); the
+    // daemon checks the rest with `git check-ref-format --branch`.
+    baseBranch: z
+      .string()
+      .refine((b) => !b.startsWith("-"), { message: "must not start with -" })
+      .optional(),
+    permissionMode: PermissionMode.default("ask"),
+  })
+  .refine((v) => v.repoId !== undefined || v.repoPath !== undefined, {
+    message: "repoId or repoPath is required",
+    path: ["repoId"],
+  });
 export type CreateTaskInput = z.input<typeof CreateTaskInput>;
+
+export const MessageInput = z.object({ text: z.string().min(1) });
+export type MessageInput = z.infer<typeof MessageInput>;

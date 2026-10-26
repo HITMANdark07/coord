@@ -1,0 +1,30 @@
+{
+  "name": "@coord/task-store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coord/protocol": "workspace:*",
+    "better-sqlite3": "11.10.0"
+  },
+  "devDependencies": {
+    "@coord/tsconfig": "workspace:*",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "^24",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:service",
+      "platform:node"
+    ]
+  }
+}

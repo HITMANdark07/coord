@@ -24,6 +24,13 @@ export function createMcpServer(client: CoordClient) {
         repoPath: z.string().describe("Absolute path of the git repository"),
         prompt: z.string().describe("What the agent should build or fix"),
         title: z.string().optional(),
+        agent: z
+          .enum(["claude-code", "codex"])
+          .optional()
+          .describe("Which agent runs it (default claude-code)"),
+        model: z.string().optional(),
+        // `bypass` is deliberately not offered: only a person may turn off permission prompts.
+        permissionMode: z.enum(["ask", "accept_edits"]).optional().describe("ask (default) or accept_edits"),
       },
     },
     async (input) => json(await client.createTask(input)),
@@ -33,6 +40,24 @@ export function createMcpServer(client: CoordClient) {
     "get_task",
     { description: "Get one task by id", inputSchema: { id: z.string() } },
     async ({ id }) => json(await client.getTask(id)),
+  );
+
+  server.registerTool(
+    "send_message",
+    {
+      description: "Send a follow-up message to a task's agent",
+      inputSchema: { id: z.string(), text: z.string().min(1) },
+    },
+    async ({ id, text }) => json(await client.sendMessage(id, text)),
+  );
+
+  server.registerTool(
+    "get_task_diff",
+    {
+      description: "Get the changes a task made: changed files and the patch",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => json(await client.taskDiff(id)),
   );
 
   return server;

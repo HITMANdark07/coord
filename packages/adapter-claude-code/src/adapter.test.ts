@@ -283,3 +283,148 @@ describe("toAgentEvents", () => {
     expect(events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("hit max turns") });
   });
 });
+
+describe("Task 2 adapter upgrades", () => {
+  const modelUsage = {
+    a: {
+      inputTokens: 10,
+      cacheReadInputTokens: 5,
+      cacheCreationInputTokens: 1,
+      outputTokens: 3,
+      costUSD: 0.5,
+    },
+    b: {
+      inputTokens: 1,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 1,
+      costUSD: 0.25,
+    },
+  };
+
+  it("maps permission modes", () => {
+    const options = buildOptions({ permissionMode: "accept_edits" }, ctx(), new AbortController());
+    expect(options.permissionMode).toBe("acceptEdits");
+  });
+
+  it("passes task env through", () => {
+    const options = buildOptions({ env: { COORD_PORT_BASE: "41000" } }, ctx(), new AbortController());
+    expect(options.env?.COORD_PORT_BASE).toBe("41000");
+  });
+
+  it("a user interrupt ends the turn instead of failing it", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const interruptQuery = (() =>
+      Object.assign(
+        (async function* () {
+          yield fixtures[0];
+          await gate;
+          yield {
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            errors: [],
+            total_cost_usd: 0,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          } as unknown as SDKMessage;
+        })(),
+        { interrupt: async () => release() },
+      )) as unknown as typeof query;
+    const run = createClaudeCodeAdapter({ query: interruptQuery }).start(
+      { taskId: "t1", prompt: "x" },
+      ctx(),
+    );
+    const out: AgentEvent[] = [];
+    for await (const e of run.events) {
+      out.push(e);
+      if (out.length === 1) await run.interrupt();
+      if (e.type === "done" || e.type === "error") run.end();
+    }
+    expect(out.at(-1)).toEqual({ type: "done", summary: "Interrupted by user" });
+  });
+
+  it("remember stays in the session", async () => {
+    const bridge = permissionBridge(
+      ctx({ requestPermission: async () => ({ allow: true, remember: true }) }),
+    );
+    const result = await bridge(
+      "Bash",
+      {},
+      permissionOptions({
+        suggestions: [
+          {
+            type: "addRules",
+            rules: [{ toolName: "Bash" }],
+            behavior: "allow",
+            destination: "projectSettings",
+          },
+        ] as PermissionUpdate[],
+      }),
+    );
+    expect(result).toMatchObject({ updatedPermissions: [{ destination: "session" }] });
+  });
+
+  it("cost comes from modelUsage including cache tokens", () => {
+    const events = toAgentEvents({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "ok",
+      total_cost_usd: 99,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      modelUsage,
+    } as unknown as SDKMessage);
+    expect(events[0]).toEqual({ type: "usage", inputTokens: 17, outputTokens: 4, costUsd: 0.75 });
+  });
+
+  it("subagent output is nested", () => {
+    const events = toAgentEvents({
+      type: "assistant",
+      parent_tool_use_id: "tu-1",
+      message: { content: [{ type: "text", text: "sub" }] },
+    } as unknown as SDKMessage);
+    expect(events).toEqual([{ type: "text", text: "sub", parentToolUseId: "tu-1" }]);
+  });
+
+  it("an interrupt only affects its own turn", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const failure = {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["boom"],
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    } as unknown as SDKMessage;
+    const twoTurns = (() =>
+      Object.assign(
+        (async function* () {
+          yield fixtures[0];
+          await gate;
+          yield failure; // turn 1, interrupted
+          yield failure; // turn 2, a real failure
+        })(),
+        { interrupt: async () => release() },
+      )) as unknown as typeof query;
+    const run = createClaudeCodeAdapter({ query: twoTurns }).start({ taskId: "t1", prompt: "x" }, ctx());
+    const out: AgentEvent[] = [];
+    for await (const e of run.events) {
+      out.push(e);
+      if (out.length === 1) await run.interrupt();
+      if (e.type === "error") run.end();
+    }
+    const ends = out.filter((e) => e.type === "done" || e.type === "error");
+    expect(ends[0]).toEqual({ type: "done", summary: "Interrupted by user" });
+    expect(ends[1]).toMatchObject({ type: "error" });
+  });
+
+  it("bypass also sets allowDangerouslySkipPermissions, other modes do not", () => {
+    const bypass = buildOptions({ permissionMode: "bypass" }, ctx(), new AbortController());
+    expect(bypass.permissionMode).toBe("bypassPermissions");
+    expect(bypass.allowDangerouslySkipPermissions).toBe(true);
+    const ask = buildOptions({ permissionMode: "ask" }, ctx(), new AbortController());
+    expect(ask).not.toHaveProperty("allowDangerouslySkipPermissions");
+  });
+});
