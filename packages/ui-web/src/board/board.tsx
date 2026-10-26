@@ -19,16 +19,18 @@ function needsYouDetail(task: Task, permissions: PermissionRequestView[]): strin
 export function Board({
   onOpen,
   onNewTask,
+  repoId,
   repoSwitcher,
 }: {
   onOpen: (taskId: string) => void;
   onNewTask: () => void;
-  /** Task 4 puts the repo switcher here. */
+  repoId: string;
+  /** Sits at the left of the board header. */
   repoSwitcher?: ReactNode;
 }) {
   const [showClosed, setShowClosed] = useState(false);
   const now = useNow();
-  const tasks = useTasks({ all: showClosed });
+  const tasks = useTasks({ repoId, all: showClosed });
   const permissions = usePermissions();
   const agents = useAgents();
   // Until agents load, only Claude Code is assumed to report cost.

@@ -1,11 +1,12 @@
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { createClient, httpTransport, localDaemonUrl, type ConnectionStatus } from "@coord/client";
 import { daemonPort, localTransport } from "@coord/local-daemon";
 import {
   DAEMON_EVENT_CHANNEL,
   DAEMON_REQUEST_CHANNEL,
   isDaemonRequest,
+  PICK_FOLDER_CHANNEL,
   toIpcReply,
   type IpcReply,
 } from "../shared/ipc";
@@ -25,6 +26,14 @@ ipcMain.handle(DAEMON_REQUEST_CHANNEL, async (_event, req: unknown): Promise<Ipc
   } catch (err) {
     return toIpcReply(err);
   }
+});
+
+// The dialog is opened here because the sandboxed renderer can't; it carries no renderer input.
+ipcMain.handle(PICK_FOLDER_CHANNEL, async (event): Promise<string | null> => {
+  const options = { properties: ["openDirectory" as const] };
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
 // One daemon subscription for the whole app, fanned out to every window. The last status is

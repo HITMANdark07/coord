@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { useDaemonStatus } from "@coord/app-state";
+import { useDaemonStatus, useRepos } from "@coord/app-state";
+import { displayText } from "@coord/protocol";
 import { colors, fontSize, radius, space } from "@coord/design-tokens";
 import { Board } from "./board/board";
 import { ErrorBoundary } from "./error-boundary";
+import { AddRepo } from "./repos/add-repo";
+import { RepoSwitcher, useSelectedRepo } from "./repos/repo-switcher";
 
 export type Notify = (n: { title: string; body: string; onClick: () => void }) => void;
 export interface AppPlatform {
@@ -13,9 +16,12 @@ export interface AppPlatform {
 const c = colors.light;
 
 /** Root screen shared by the desktop window and the PWA. Each app wraps it in <ClientProvider>. */
-export function App({ surface }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
+export function App({ surface, platform }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
   // Task 5 renders the panel for this id; Task 7 opens the new-task form.
   const [, setOpenTaskId] = useState<string | null>(null);
+  const repos = useRepos();
+  const list = repos.status === "loading" ? [] : (repos.data ?? []);
+  const [selected, select] = useSelectedRepo(list);
   return (
     <ErrorBoundary>
       <main style={{ fontFamily: "system-ui, sans-serif", color: c.text, padding: space.xl }}>
@@ -24,7 +30,30 @@ export function App({ surface }: { surface: "desktop" | "web"; platform?: AppPla
           <span style={{ color: c.muted, fontSize: fontSize.sm }}>{surface}</span>
         </header>
         <DaemonBanner />
-        <Board onOpen={setOpenTaskId} onNewTask={() => {}} />
+        {repos.status === "error" && <p role="alert">Could not load repos: {displayText(repos.error)}</p>}
+        {selected ? (
+          <Board
+            repoId={selected.id}
+            onOpen={setOpenTaskId}
+            onNewTask={() => {}}
+            repoSwitcher={
+              <RepoSwitcher
+                repos={list}
+                selected={selected}
+                onSelect={select}
+                surface={surface}
+                platform={platform}
+              />
+            }
+          />
+        ) : (
+          repos.status === "ok" && (
+            <section>
+              <p>Add a repo to start</p>
+              <AddRepo platform={platform} onAdded={(repo) => select(repo.id)} />
+            </section>
+          )
+        )}
       </main>
     </ErrorBoundary>
   );

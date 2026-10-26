@@ -27,7 +27,24 @@ const renderApp = (health: () => unknown) =>
   render(
     <ClientProvider
       client={createClient(
-        fakeTransport((req) => (req.path === "/health" ? health() : req.path === "/agents" ? [] : [task])),
+        fakeTransport((req) =>
+          req.path === "/health"
+            ? health()
+            : req.path === "/repos"
+              ? [
+                  {
+                    id: "r",
+                    name: "repo",
+                    path: "/repo",
+                    defaultBranch: "main",
+                    remoteUrl: null,
+                    createdAt: "x",
+                  },
+                ]
+              : req.path === "/agents"
+                ? []
+                : [task],
+        ),
       )}
     >
       <App surface="web" />

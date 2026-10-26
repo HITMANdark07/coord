@@ -41,7 +41,7 @@ function setup(tasks: unknown[], permissions: unknown[] = [], onOpen = vi.fn(), 
   });
   render(
     <ClientProvider client={createClient(transport)}>
-      <Board onOpen={onOpen} onNewTask={() => {}} />
+      <Board repoId="r" onOpen={onOpen} onNewTask={() => {}} />
     </ClientProvider>,
   );
   return onOpen;
@@ -113,7 +113,7 @@ describe("Board", () => {
     });
     render(
       <ClientProvider client={createClient(transport)}>
-        <Board onOpen={() => {}} onNewTask={() => {}} />
+        <Board repoId="r" onOpen={() => {}} onNewTask={() => {}} />
       </ClientProvider>,
     );
     await screen.findByText("Task a");
