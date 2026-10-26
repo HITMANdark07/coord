@@ -27,9 +27,10 @@ pnpm coord watch <id>   # follow the task (any unique id prefix of 4+ characters
 pnpm coord diff <id>    # see what the agent changed
 pnpm coord ls
 
+# open the board: `pnpm desktop`, or `pnpm coord web`
 pnpm desktop          # Electron app (starts the daemon if it isn't running)
 pnpm web              # PWA dev server on http://localhost:5173 (proxies /api to the daemon)
-pnpm coord web          # prints the link that opens the web app with the daemon's token
+pnpm coord web          # prints the link that opens the board in the browser, with the daemon's token (needs `pnpm web` running)
 pnpm mobile           # Expo dev server
 ```
 
