@@ -185,6 +185,25 @@ describe("worktrees", () => {
     expect(existsSync(join(path, ".env"))).toBe(true);
   });
 
+  it("with status.showUntrackedFiles=no an edited env copy still blocks the removal", async () => {
+    const { path, env } = await makeTempRepo();
+    // A user setting that hides untracked files from `git status`, and so from a plain
+    // `git worktree remove`, which would then delete them.
+    git(path, env, "config", "status.showUntrackedFiles", "no");
+    for (const f of [".env", ".env.edited"]) await writeFile(join(path, f), "A=1\n");
+    const wt = join(await tmp(), "wt");
+    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/u", baseRef: "main" });
+    const files = [".env", ".env.edited"];
+    await copyEnvFiles(path, wt, files);
+    await writeFile(join(wt, ".env.edited"), "A=2\n");
+
+    await removeEnvCopies(path, wt, files);
+    expect(existsSync(join(wt, ".env"))).toBe(false);
+    await expect(removeWorktree(path, wt)).rejects.toBeInstanceOf(GitError);
+
+    expect(await readFile(join(wt, ".env.edited"), "utf8")).toBe("A=2\n");
+  });
+
   it("branchTip reads a local branch's commit, null when there is none", async () => {
     const { path, env } = await makeTempRepo();
     expect(await branchTip(path, "main")).toBe(git(path, env, "rev-parse", "main").trim());

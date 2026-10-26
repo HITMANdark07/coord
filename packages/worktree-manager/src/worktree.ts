@@ -85,7 +85,8 @@ export async function removeEnvCopies(
   files: string[],
 ): Promise<void> {
   for (const file of files) {
-    const status = await git(["status", "--porcelain", "-z", "--", `:(literal)${file}`], {
+    // -uall: with the user's status.showUntrackedFiles=no the copy wouldn't be listed at all.
+    const status = await git(["status", "--porcelain", "-z", "-uall", "--", `:(literal)${file}`], {
       cwd: worktreePath,
     });
     if (status !== `?? ${file}\0`) continue;
@@ -98,8 +99,10 @@ export async function removeEnvCopies(
 }
 
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
-  // No --force: git refuses a worktree with changes, which is the point (never lose work).
-  await git(["worktree", "remove", worktreePath], { cwd: repoPath });
+  // No --force: git refuses a worktree with changes, which is the point (never lose work). Its
+  // check is `git status`, which the user's status.showUntrackedFiles=no would blind to untracked
+  // files (an edited env copy, say), and those would be deleted with the worktree.
+  await git(["-c", "status.showUntrackedFiles=all", "worktree", "remove", worktreePath], { cwd: repoPath });
 }
 
 /** The real path of `path`, which may not exist: its nearest existing ancestor is resolved. */

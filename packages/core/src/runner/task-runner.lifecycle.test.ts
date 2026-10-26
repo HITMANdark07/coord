@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -114,6 +114,15 @@ async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<s
   const commits = (branch: string) =>
     git(repo.path, "log", "--reverse", "--format=%s", `main..${branch}`).trim().split("\n").filter(Boolean);
   return { ...daemon, repo, home, store, env, create, commits };
+}
+
+/** Commits `.coord/config.json` to main, where setup reads it from (spec §7). */
+async function commitConfig(repo: { path: string; env: Record<string, string> }, config: unknown) {
+  await mkdir(join(repo.path, ".coord"), { recursive: true });
+  await writeFile(join(repo.path, ".coord/config.json"), JSON.stringify(config));
+  const env = { ...process.env, ...repo.env };
+  execFileSync("git", ["add", ".coord/config.json"], { cwd: repo.path, env });
+  execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "config"], { cwd: repo.path, env });
 }
 
 describe("TaskRunner lifecycle", () => {
@@ -607,6 +616,33 @@ describe("TaskRunner lifecycle", () => {
     expect(t.discardedAt).toBeNull();
     expect(t.worktreePath).toBe(parked.worktreePath);
     expect(await readFile(join(parked.worktreePath!, "a.txt"), "utf8")).toBe("a.txt from the agent\n");
+  });
+
+  it("discard keeps an env copy the agent edited, even when git status hides untracked files", async () => {
+    const { repo, store, runner, create, commits } = await setup([
+      edit("a.txt"),
+      edit(".env", "TOKEN=agent\n"),
+      done,
+    ]);
+    await commitConfig(repo, { envFiles: [".env", ".env.local"] });
+    await writeFile(join(repo.path, ".env"), "TOKEN=user\n");
+    await writeFile(join(repo.path, ".env.local"), "LOCAL=1\n");
+    git(repo.path, "config", "status.showUntrackedFiles", "no");
+    const task = await create();
+    await runner.idle();
+    const before = store.getTask(task.id)!;
+
+    await expect(runner.discard(task.id)).rejects.toMatchObject({ code: "conflict" });
+
+    // The edited copy is never committed (it holds secrets), so the worktree is its only home.
+    expect(await readFile(join(before.worktreePath!, ".env"), "utf8")).toBe("TOKEN=agent\n");
+    // The unchanged copy was removed: only the edited one is in the way.
+    expect(existsSync(join(before.worktreePath!, ".env.local"))).toBe(false);
+    expect(store.getTask(task.id)).toMatchObject({
+      status: "review",
+      error: expect.stringMatching(/^discard failed: /),
+    });
+    expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
   });
 
   it("a failed worktree removal keeps the task after committing", async () => {
