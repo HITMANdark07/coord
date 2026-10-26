@@ -149,8 +149,8 @@ function notSent(texts: string[]): string {
 }
 
 /** Joins error notes into one `error` value; null when there are none. */
-function joinNotes(...notes: string[]): string | null {
-  return notes.filter((n) => n.length > 0).join(" ") || null;
+function joinNotes(...notes: Array<string | null>): string | null {
+  return notes.filter((n) => n !== null && n.length > 0).join(" ") || null;
 }
 
 /** Git's own message when it has one: it says what to fix (identity, signing, a locked worktree). */
@@ -314,7 +314,12 @@ export class TaskRunner {
     }
     // Never set up: no worktree, no work, nothing to keep.
     if (task.status === "queued" && task.worktreePath === null) {
-      return this.transition(taskId, "cancelled", { pendingMessage: null });
+      // A follow-up whose setup never ran (it failed first) won't run now: show it.
+      const unsent = notSent(task.pendingMessage === null ? [] : [task.pendingMessage]);
+      return this.transition(taskId, "cancelled", {
+        pendingMessage: null,
+        ...(unsent ? { error: joinNotes(task.error, unsent) } : {}),
+      });
     }
     return this.close(taskId, async () => this.discardWork(taskId, await this.stop(taskId)));
   }
@@ -582,17 +587,23 @@ export class TaskRunner {
     const task = this.deps.store.getTask(taskId);
     if (!task) return;
     const turns = task.turns + 1;
+    // run.end() only closes the agent's input: messages it has already read still run as turns,
+    // in a worktree that is now in review or being discarded. So when messages were dropped, or a
+    // cancel is closing the task, kill the run. Do it before the commit: this turn's `done` is in,
+    // so nothing of it is in flight, and a queued turn can't start editing during the commit.
+    // The commit still takes everything on disk. Otherwise the agent finishes gracefully.
+    const killIfDropped = () => {
+      if (live.dropped.length > 0 || this.closing.has(taskId)) live.abort.abort();
+    };
+    killIfDropped();
     let commitError: string | undefined;
     try {
       await this.commitWork(task, turns);
     } catch (e) {
       commitError = gitMessage(e);
     } finally {
-      // run.end() only closes the agent's input: messages it has already read still run as
-      // turns, in a worktree that is now in review or being discarded. So when messages were
-      // dropped, or a cancel is closing the task, kill the run, after this turn's commit so its
-      // work is kept. Otherwise the agent finishes gracefully.
-      if (live.dropped.length > 0 || this.closing.has(taskId)) live.abort.abort();
+      // A cancel may have started during the commit.
+      killIfDropped();
       run.end();
     }
     if (this.live.get(taskId) === live) this.live.delete(taskId);
@@ -757,7 +768,7 @@ export class TaskRunner {
       worktreePath: null,
       pendingMessage: null,
       discardedAt: new Date().toISOString(),
-      ...(unsent ? { error: unsent } : {}),
+      ...(unsent ? { error: joinNotes(this.get(taskId).error, unsent) } : {}),
     });
   }
 

@@ -645,27 +645,31 @@ describe("TaskRunner lifecycle", () => {
     expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
   });
 
-  it("discard fails loudly when the worktree can't be checked, and prunes nothing", async () => {
-    const { repo, store, runner, create } = await setup([edit("a.txt"), done]);
-    const task = await create();
-    await runner.idle();
-    const before = store.getTask(task.id)!;
-    // stat() of the worktree fails with EACCES, not ENOENT: that is not "deleted by hand".
-    const parent = dirname(before.worktreePath!);
-    await chmod(parent, 0o000);
-    try {
-      await expect(runner.discard(task.id)).rejects.toMatchObject({ code: "conflict" });
-    } finally {
-      await chmod(parent, 0o755);
-    }
+  // Root ignores file modes, so the EACCES this test needs can't happen there.
+  it.skipIf(process.getuid?.() === 0)(
+    "discard fails loudly when the worktree can't be checked, and prunes nothing",
+    async () => {
+      const { repo, store, runner, create } = await setup([edit("a.txt"), done]);
+      const task = await create();
+      await runner.idle();
+      const before = store.getTask(task.id)!;
+      // stat() of the worktree fails with EACCES, not ENOENT: that is not "deleted by hand".
+      const parent = dirname(before.worktreePath!);
+      await chmod(parent, 0o000);
+      try {
+        await expect(runner.discard(task.id)).rejects.toMatchObject({ code: "conflict" });
+      } finally {
+        await chmod(parent, 0o755);
+      }
 
-    const t = store.getTask(task.id)!;
-    expect(t.status).toBe("review");
-    // The stat itself fails the discard, before anything tries to forget the worktree.
-    expect(t.error).toMatch(/^discard failed: EACCES: permission denied, stat '/);
-    expect(git(repo.path, "worktree", "list")).toContain(before.worktreePath!);
-    expect(existsSync(join(before.worktreePath!, "a.txt"))).toBe(true);
-  });
+      const t = store.getTask(task.id)!;
+      expect(t.status).toBe("review");
+      // The stat itself fails the discard, before anything tries to forget the worktree.
+      expect(t.error).toMatch(/^discard failed: EACCES: permission denied, stat '/);
+      expect(git(repo.path, "worktree", "list")).toContain(before.worktreePath!);
+      expect(existsSync(join(before.worktreePath!, "a.txt"))).toBe(true);
+    },
+  );
 
   it("a failed cancel of a queued follow-up keeps its text in the error", async () => {
     const gitEnv = await noIdentityGitEnv();
@@ -689,6 +693,51 @@ describe("TaskRunner lifecycle", () => {
     expect(t.pendingMessage).toBeNull();
     expect(t.error).toContain("please also update the docs");
     expect(await readFile(join(t.worktreePath!, "a.txt"), "utf8")).toBe("a.txt from the agent\n");
+    await runner.cancel(b.id);
+  });
+
+  it("cancelling a queued follow-up keeps the task's error and shows the unsent text", async () => {
+    const { store, broker, runner, create } = await setup(
+      [{ permission }, edit("a.txt"), { event: { type: "error", message: "boom" } }],
+      { maxConcurrent: 1 },
+    );
+    const a = await create();
+    await vi.waitFor(() => expect(broker.pending(a.id)).toHaveLength(1));
+    broker.answer(broker.pending(a.id)[0]!.id, { allow: true });
+    await vi.waitFor(() => expect(store.getTask(a.id)!.status).toBe("failed"));
+    const b = await create();
+    // B holds the only slot, so A's resume stays queued.
+    await vi.waitFor(() => expect(broker.pending(b.id)).toHaveLength(1));
+    await runner.resume(a.id);
+    expect(store.getTask(a.id)!.status).toBe("queued");
+
+    const t = await runner.cancel(a.id);
+
+    expect(t.status).toBe("cancelled");
+    expect(t.error).toBe('boom Not sent: "Continue where you left off."');
+    await runner.cancel(b.id);
+  });
+
+  it("cancelling a queued follow-up that was never set up shows the unsent text", async () => {
+    const { store, broker, runner, create, statuses } = await setup([{ permission }, done], {
+      maxConcurrent: 1,
+    });
+    // Setup fails before any worktree exists.
+    const a = await create({ baseBranch: "no-such-branch" });
+    await runner.idle();
+    const failed = store.getTask(a.id)!;
+    expect(failed).toMatchObject({ status: "failed", worktreePath: null });
+    const b = await create();
+    await vi.waitFor(() => expect(broker.pending(b.id)).toHaveLength(1));
+    await runner.resume(a.id);
+    expect(store.getTask(a.id)!.status).toBe("queued");
+
+    const t = await runner.cancel(a.id);
+
+    expect(t.status).toBe("cancelled");
+    expect(t.pendingMessage).toBeNull();
+    expect(t.error).toBe(`${failed.error} Not sent: "Continue where you left off."`);
+    expect(statuses(a.id).slice(-2)).toEqual(["queued", "cancelled"]);
     await runner.cancel(b.id);
   });
 

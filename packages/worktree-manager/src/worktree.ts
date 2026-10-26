@@ -109,7 +109,8 @@ export async function forgetWorktree(repoPath: string, worktreePath: string): Pr
     } catch {
       continue;
     }
-    if (!targets.has(dirname(gitdir))) continue;
+    // With worktree.useRelativePaths (git 2.48+) the path is relative to the admin entry.
+    if (!targets.has(dirname(resolve(admin, name, gitdir)))) continue;
     if (await exists(join(admin, name, "locked"))) {
       throw new Error(`worktree ${worktreePath} is locked; unlock it with \`git worktree unlock\``);
     }

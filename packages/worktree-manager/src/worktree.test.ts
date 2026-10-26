@@ -196,6 +196,23 @@ describe("worktrees", () => {
     await forgetWorktree(path, a);
   });
 
+  it("forgetWorktree finds a worktree git recorded with a relative path", async () => {
+    const { path, env } = await makeTempRepo();
+    // git 2.48+: the user's config can make git record worktree paths relative to its admin dir.
+    git(path, env, "config", "worktree.useRelativePaths", "true");
+    const wt = join(await tmp(), "rel");
+    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/rel", baseRef: "main" });
+    const gitdirs = git(path, env, "worktree", "list", "--porcelain");
+    expect(gitdirs).toMatch(/\/rel\n/);
+    await rm(wt, { recursive: true, force: true });
+
+    await forgetWorktree(path, wt);
+
+    expect(git(path, env, "worktree", "list", "--porcelain")).not.toMatch(/\/rel\n/);
+    // The record is gone, so the branch can be deleted later (the 14-day sweep).
+    await deleteBranch(path, "agent/rel");
+  });
+
   it("forgetWorktree refuses a locked worktree", async () => {
     const { path, env } = await makeTempRepo();
     const wt = join(await tmp(), "wt");
