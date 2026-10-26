@@ -21,7 +21,7 @@ const ipcTransport: Transport = {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ClientProvider client={createClient(ipcTransport)}>
-      <App surface="desktop" />
+      <App surface="desktop" platform={{ pickFolder: () => window.coord.pickFolder() }} />
     </ClientProvider>
   </StrictMode>,
 );

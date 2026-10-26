@@ -45,7 +45,7 @@ export async function testDaemon(script: FakeStep[] = [{ event: { type: "done" }
     runner: theRunner,
     adapter,
     /** Authenticated request helper. */
-    call: (method: "GET" | "POST", url: string, payload?: unknown) =>
+    call: (method: "GET" | "POST" | "PATCH", url: string, payload?: unknown) =>
       app.inject({
         method,
         url,

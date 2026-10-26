@@ -16,6 +16,7 @@ import type { Store } from "@coord/task-store";
 import { StoreConflictError } from "@coord/task-store";
 import type { EventBus } from "./event-bus";
 import type { PermissionBroker } from "./permission-broker";
+import { agentRoutes } from "./routes/agents";
 import { permissionRoutes } from "./routes/permissions";
 import { repoRoutes } from "./routes/repos";
 import { taskRoutes } from "./routes/tasks";
@@ -156,7 +157,8 @@ export function createServer(options: ServerOptions) {
       daemonVersion: DAEMON_VERSION,
     }));
 
-    api.register(repoRoutes(store));
+    api.register(repoRoutes(store, runner));
+    api.register(agentRoutes(runner));
     api.register(taskRoutes(store, runner));
     api.register(permissionRoutes(broker));
 

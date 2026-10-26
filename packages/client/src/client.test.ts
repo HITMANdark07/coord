@@ -123,7 +123,7 @@ describe("createClient API methods", () => {
   const cases: Array<{
     name: string;
     call: (c: ReturnType<typeof createClient>) => Promise<unknown>;
-    method: "GET" | "POST";
+    method: "GET" | "POST" | "PATCH";
     path: string;
     body?: unknown;
     reply: unknown;
@@ -146,6 +146,36 @@ describe("createClient API methods", () => {
       body: { path: "/repo" },
       reply: repo,
       bad: {},
+    },
+    {
+      name: "updateRepo",
+      call: (c) => c.updateRepo("r/1", { bypassAllowed: true }),
+      method: "PATCH",
+      path: "/repos/r%2F1",
+      body: { bypassAllowed: true },
+      reply: { ...repo, bypassAllowed: true },
+      bad: {},
+    },
+    {
+      name: "repoConfig",
+      call: (c) => c.repoConfig("r1"),
+      method: "GET",
+      path: "/repos/r1/config",
+      reply: {
+        baseBranch: "main",
+        config: { envFiles: [], ports: { start: 41000, blockSize: 10 } },
+        setup: [],
+        setupSource: "detected",
+      },
+      bad: { baseBranch: "main" },
+    },
+    {
+      name: "listAgents",
+      call: (c) => c.listAgents(),
+      method: "GET",
+      path: "/agents",
+      reply: [{ id: "claude-code", available: true, costReporting: true, liveMessages: true }],
+      bad: [{ id: "claude-code" }],
     },
     {
       name: "listTasks",
@@ -280,6 +310,9 @@ describe("createClient API methods", () => {
     await expect(createClient(transport).addRepo("relative")).rejects.toThrow(/absolute/);
     await expect(createClient(transport).sendMessage("t1", "")).rejects.toThrow();
     await expect(createClient(transport).answerPermission("p1", { allow: "yes" } as never)).rejects.toThrow();
+    await expect(
+      createClient(transport).updateRepo("r1", { bypassAllowed: "yes" } as never),
+    ).rejects.toThrow();
     expect(transport.requests).toEqual([]);
   });
 });

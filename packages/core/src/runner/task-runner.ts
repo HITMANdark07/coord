@@ -2,11 +2,15 @@ import { execFile } from "node:child_process";
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AgentId,
   CreateTaskInput,
+  firstLine,
   type AgentAdapter,
-  type AgentId,
+  type AgentInfo,
   type AgentRun,
   type DaemonEventPayload,
+  type Repo,
+  type RepoConfig,
   type RunContext,
   type RunOptions,
   type Task,
@@ -141,8 +145,7 @@ function normalizeTitle(text: string): string {
 }
 
 function titleFrom(prompt: string): string {
-  const line = prompt.split("\n").find((l) => l.trim().length > 0) ?? prompt;
-  return normalizeTitle(line);
+  return normalizeTitle(firstLine(prompt));
 }
 
 /** `git check-ref-format --branch`, without a shell: the name comes from a client. */
@@ -155,6 +158,32 @@ function isValidBranchName(name: string, cwd: string): Promise<boolean> {
 /** A base branch name git takes as a branch, never as an option (it reaches fetch and show). */
 async function isValidBaseBranch(name: string, cwd: string): Promise<boolean> {
   return !name.startsWith("-") && (await isValidBranchName(name, cwd));
+}
+
+/**
+ * The base a task starts from and the config read from it (spec §7): the explicit base, or the
+ * repo's default branch with one hop to the config's `baseBranch`. setup and checks come from the
+ * base ref, never the task branch. `resolveRef` turns a branch into a ref: setup fetches, reads
+ * (the New task form) don't.
+ */
+export async function resolveBase(
+  repo: Pick<Repo, "path" | "defaultBranch">,
+  explicit: string | null,
+  resolveRef: (repoPath: string, base: string) => Promise<string>,
+): Promise<{ baseBranch: string; ref: string; config: RepoConfig }> {
+  const baseBranch = explicit ?? repo.defaultBranch;
+  const ref = await resolveRef(repo.path, baseBranch);
+  const config = await readRepoConfig(repo.path, ref);
+  if (explicit !== null || !config.baseBranch || config.baseBranch === baseBranch) {
+    return { baseBranch, ref, config };
+  }
+  // The config is repo content, as untrusted as a client: check it before git sees it.
+  if (!(await isValidBaseBranch(config.baseBranch, repo.path))) {
+    throw new Error(`.coord/config.json has an invalid baseBranch: ${JSON.stringify(config.baseBranch)}`);
+  }
+  // Setup and checks are read again from the base the task actually starts from.
+  const hopRef = await resolveRef(repo.path, config.baseBranch);
+  return { baseBranch: config.baseBranch, ref: hopRef, config: await readRepoConfig(repo.path, hopRef) };
 }
 
 /** How messages the agent never ran are shown to the user, in the task's error. */
@@ -281,6 +310,24 @@ export class TaskRunner {
     this.publish({ kind: "task.updated", task: toTask(task) });
     this.schedule();
     return store.getTask(task.id) ?? task;
+  }
+
+  /** Every agent Coord knows, and whether this daemon can run it (the New task form). */
+  agents(): AgentInfo[] {
+    return AgentId.options.map((id) => {
+      const capabilities = this.deps.adapters[id]?.capabilities;
+      return {
+        id,
+        available: capabilities !== undefined,
+        costReporting: capabilities?.costReporting ?? false,
+        liveMessages: capabilities?.liveMessages ?? false,
+      };
+    });
+  }
+
+  /** Tells every client a repo was registered or its settings changed. */
+  repoUpdated(repo: Repo): void {
+    this.publish({ kind: "repo.updated", repo });
   }
 
   /** Called by the PermissionBroker whenever a task's pending prompts change. */
@@ -528,10 +575,11 @@ export class TaskRunner {
       const { config, baseBranch, branch, worktreePath, retry } = await this.withRepoLock(
         repo.id,
         async () => {
+          const fetched = async (repoPath: string, base: string) =>
+            (await resolveBaseRef(repoPath, base)).ref;
           if (task.worktreePath !== null && task.branch !== null && task.baseBranch !== null) {
             // Setup again in the worktree it already made; its config from the same base (spec §7).
-            const { ref } = await resolveBaseRef(repo.path, task.baseBranch);
-            const config = await readRepoConfig(repo.path, ref);
+            const { config } = await resolveBase(repo, task.baseBranch, fetched);
             return {
               config,
               baseBranch: task.baseBranch,
@@ -540,23 +588,7 @@ export class TaskRunner {
               retry: true,
             };
           }
-          let baseBranch = task.baseBranch ?? repo.defaultBranch;
-          let { ref } = await resolveBaseRef(repo.path, baseBranch);
-          // setup/checks come from the base ref, never the task branch (spec §7).
-          let config = await readRepoConfig(repo.path, ref);
-          // Without an explicit base, the config's baseBranch picks it (spec §7). Its setup and
-          // checks are then read again from that base, the one the task actually starts from.
-          if (task.baseBranch === null && config.baseBranch && config.baseBranch !== baseBranch) {
-            // The config is repo content, as untrusted as a client: check it before git sees it.
-            if (!(await isValidBaseBranch(config.baseBranch, repo.path))) {
-              throw new Error(
-                `.coord/config.json has an invalid baseBranch: ${JSON.stringify(config.baseBranch)}`,
-              );
-            }
-            baseBranch = config.baseBranch;
-            ({ ref } = await resolveBaseRef(repo.path, baseBranch));
-            config = await readRepoConfig(repo.path, ref);
-          }
+          const { baseBranch, ref, config } = await resolveBase(repo, task.baseBranch, fetched);
           const branch = task.branch ?? (await uniqueBranch(repo.path, BRANCH_PREFIX + slugify(task.title)));
           const dir = branch.slice(BRANCH_PREFIX.length).replaceAll("/", "-");
           // The worktrees hold the user's code and copied env files: owner-only (AGENTS.md rule 8).

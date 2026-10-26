@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DaemonError } from "@coord/client";
-import { fromIpcReply, isDaemonRequest, toIpcReply } from "./ipc";
+import {
+  DAEMON_EVENT_CHANNEL,
+  DAEMON_REQUEST_CHANNEL,
+  PICK_FOLDER_CHANNEL,
+  fromIpcReply,
+  isDaemonRequest,
+  toIpcReply,
+} from "./ipc";
 
 describe("isDaemonRequest", () => {
   it("accepts normal API requests", () => {
@@ -36,5 +43,12 @@ describe("IPC replies", () => {
 
   it("passes successful bodies through", () => {
     expect(fromIpcReply({ ok: true, body: [1] })).toEqual([1]);
+  });
+});
+
+describe("PICK_FOLDER_CHANNEL", () => {
+  it("is distinct from the daemon channels", () => {
+    expect(PICK_FOLDER_CHANNEL).toBe("coord:pick-folder");
+    expect([DAEMON_REQUEST_CHANNEL, DAEMON_EVENT_CHANNEL]).not.toContain(PICK_FOLDER_CHANNEL);
   });
 });

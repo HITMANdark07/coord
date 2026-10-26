@@ -152,6 +152,8 @@ describe("daemon over a real socket", () => {
           }
         },
         onEvent: (event) => {
+          // Registering the repo publishes repo.updated first.
+          if (event.payload.kind !== "task.updated") return;
           stop();
           resolve(event);
         },

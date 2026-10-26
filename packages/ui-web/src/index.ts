@@ -1,1 +1,1 @@
-export { App } from "./app";
+export { App, type AppPlatform, type Notify } from "./app";

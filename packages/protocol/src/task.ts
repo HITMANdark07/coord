@@ -3,14 +3,20 @@ import { z } from "zod";
 export const AgentId = z.enum(["claude-code", "codex", "gemini", "aider"]);
 export type AgentId = z.infer<typeof AgentId>;
 
-/** Task lifecycle, see PRD §5. `interrupted` = daemon restarted mid-run (PRD §8); `cancelled` = user stopped it. */
+/**
+ * Task lifecycle, see PRD §5. `interrupted` = daemon restarted mid-run (PRD §8); `cancelled` = user
+ * stopped it. `checking`, `pr_open` and `closed` come with checks and pull requests (plan 3).
+ */
 export const TaskStatus = z.enum([
   "queued",
   "setting_up",
   "running",
   "needs_input",
   "review",
+  "checking",
+  "pr_open",
   "merged",
+  "closed",
   "failed",
   "interrupted",
   "cancelled",

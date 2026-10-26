@@ -71,6 +71,9 @@ importers:
       '@coord/local-daemon':
         specifier: workspace:*
         version: link:../../packages/local-daemon
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       commander:
         specifier: 15.0.0
         version: 15.0.0

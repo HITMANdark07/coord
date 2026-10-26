@@ -6,6 +6,9 @@ export const DAEMON_REQUEST_CHANNEL = "coord:daemon-request";
 /** Main → renderer: daemon push events. */
 export const DAEMON_EVENT_CHANNEL = "coord:daemon-event";
 
+/** Renderer → main: ask the user for a folder with the OS dialog; resolves to its path or null. */
+export const PICK_FOLDER_CHANNEL = "coord:pick-folder";
+
 const METHODS = new Set<TransportRequest["method"]>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
 /**
@@ -50,5 +53,6 @@ export type DaemonPush = { event: unknown } | { status: ConnectionStatus };
 
 export interface CoordBridge {
   request(req: TransportRequest): Promise<IpcReply>;
+  pickFolder(): Promise<string | null>;
   onPush(listener: (push: DaemonPush) => void): () => void;
 }

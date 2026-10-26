@@ -1,10 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DiffView, PermissionRequestView, Repo, Task, type DaemonEvent } from "@coord/protocol";
+import {
+  AgentId,
+  AgentInfo,
+  DiffView,
+  PermissionRequestView,
+  Repo,
+  RepoConfigView,
+  Task,
+  type DaemonEvent,
+} from "@coord/protocol";
 import type { FakeStep } from "../runner/testing";
 import { auth, testDaemon } from "../test-daemon";
 
@@ -36,6 +45,17 @@ async function register(d: Daemon) {
   const res = await d.call("POST", "/repos", { path: d.repo.path });
   expect(res.statusCode).toBe(201);
   return Repo.parse(res.json());
+}
+
+/** Commits `files` on the repo's current branch. */
+async function commit(d: Daemon, files: Record<string, string>) {
+  const env = { ...process.env, ...d.repo.env };
+  for (const [file, content] of Object.entries(files)) {
+    await mkdir(dirname(join(d.repo.path, file)), { recursive: true });
+    await writeFile(join(d.repo.path, file), content);
+  }
+  execFileSync("git", ["add", "-A"], { cwd: d.repo.path, env });
+  execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "files"], { cwd: d.repo.path, env });
 }
 
 async function waitFor(check: () => boolean) {
@@ -93,6 +113,82 @@ describe("repo routes", () => {
     const d = await daemon();
     expect((await d.call("GET", "/repos/nope")).statusCode).toBe(404);
     expect((await d.call("POST", "/repos", { path: "relative" })).statusCode).toBe(400);
+  });
+});
+
+describe("agents and repo settings", () => {
+  it("GET /agents lists claude-code as available and codex as not", async () => {
+    const d = await daemon();
+    const res = await d.call("GET", "/agents");
+    expect(res.statusCode).toBe(200);
+    const agents = (res.json() as unknown[]).map((a) => AgentInfo.parse(a));
+    expect(agents.map((a) => a.id)).toEqual(AgentId.options);
+    expect(agents.find((a) => a.id === "claude-code")).toEqual({
+      id: "claude-code",
+      available: true,
+      costReporting: true,
+      liveMessages: true,
+    });
+    expect(agents.find((a) => a.id === "codex")).toEqual({
+      id: "codex",
+      available: false,
+      costReporting: false,
+      liveMessages: false,
+    });
+  });
+
+  it("GET /repos/:id/config reads the config from the base branch without fetching", async () => {
+    const d = await daemon();
+    await commit(d, { ".coord/config.json": JSON.stringify({ baseBranch: "dev", setup: ["echo main"] }) });
+    execFileSync("git", ["checkout", "-q", "-b", "dev"], { cwd: d.repo.path });
+    await commit(d, { ".coord/config.json": JSON.stringify({ setup: ["echo dev"], envFiles: [".env"] }) });
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: d.repo.path });
+    const repo = await register(d);
+    // A fetch from this remote would fail; reading the config must not touch it.
+    execFileSync("git", ["remote", "add", "origin", "/nonexistent/remote.git"], { cwd: d.repo.path });
+
+    const res = await d.call("GET", `/repos/${repo.id}/config`);
+    expect(res.statusCode).toBe(200);
+    const view = RepoConfigView.parse(res.json());
+    expect(view).toMatchObject({ baseBranch: "dev", setup: ["echo dev"], setupSource: "config" });
+    expect(view.config.envFiles).toEqual([".env"]);
+    expect((await d.call("GET", "/repos/nope/config")).statusCode).toBe(404);
+  });
+
+  it("GET /repos/:id/config detects setup when the config has none, and reports a broken config", async () => {
+    const d = await daemon();
+    const repo = await register(d);
+    await writeFile(join(d.repo.path, "pnpm-lock.yaml"), "");
+    const view = RepoConfigView.parse((await d.call("GET", `/repos/${repo.id}/config`)).json());
+    expect(view).toMatchObject({
+      baseBranch: "main",
+      setup: ["pnpm install --frozen-lockfile"],
+      setupSource: "detected",
+    });
+
+    await commit(d, { ".coord/config.json": "{ not json" });
+    const broken = await d.call("GET", `/repos/${repo.id}/config`);
+    expect(broken.statusCode).toBe(409);
+    expect(broken.json()).toMatchObject({ code: "conflict", message: expect.stringContaining("JSON") });
+  });
+
+  it("PATCH /repos/:id sets bypassAllowed and publishes repo.updated", async () => {
+    const d = await daemon();
+    const seen: DaemonEvent[] = [];
+    d.bus.subscribe((e) => seen.push(e));
+    const repo = await register(d);
+    expect(seen.map((e) => e.payload)).toEqual([{ kind: "repo.updated", repo }]);
+
+    const res = await d.call("PATCH", `/repos/${repo.id}`, { bypassAllowed: true });
+    expect(res.statusCode).toBe(200);
+    const updated = Repo.parse(res.json());
+    expect(updated).toEqual({ ...repo, bypassAllowed: true });
+    expect(d.store.getRepo(repo.id)?.bypassAllowed).toBe(true);
+    expect(seen.at(-1)?.payload).toEqual({ kind: "repo.updated", repo: updated });
+
+    expect((await d.call("PATCH", `/repos/${repo.id}`, { bypassAllowed: "yes" })).statusCode).toBe(400);
+    expect((await d.call("PATCH", "/repos/nope", { bypassAllowed: true })).statusCode).toBe(404);
+    expect(seen).toHaveLength(2);
   });
 });
 
@@ -277,6 +373,9 @@ describe("task routes", () => {
       ["GET", "/repos"],
       ["POST", "/repos"],
       ["GET", "/repos/x"],
+      ["PATCH", "/repos/x"],
+      ["GET", "/repos/x/config"],
+      ["GET", "/agents"],
       ["GET", "/tasks"],
       ["POST", "/tasks"],
       ["GET", "/tasks/x"],
@@ -292,7 +391,7 @@ describe("task routes", () => {
     ];
     const { authorization: _drop, ...noToken } = auth;
     for (const [method, url] of routes) {
-      const res = await d.app.inject({ method: method as "GET" | "POST", url, headers: noToken });
+      const res = await d.app.inject({ method: method as "GET" | "POST" | "PATCH", url, headers: noToken });
       expect(res.statusCode, `${method} ${url}`).toBe(401);
     }
   });
@@ -309,6 +408,24 @@ describe("diff route", () => {
     const diff = DiffView.parse(res.json());
     expect(diff.files).toEqual([{ path: "a.txt", status: "added", additions: 1, deletions: 0 }]);
     expect(diff.patch).toContain("+from the agent");
+  });
+
+  it("diff route never shows a copied env file", async () => {
+    const d = await daemon([editA, done]);
+    // The repo doesn't ignore .env, so without the exclude the copy would show up as added.
+    await commit(d, { ".coord/config.json": JSON.stringify({ envFiles: [".env"] }) });
+    await writeFile(join(d.repo.path, ".env"), "SECRET=hunter2\n");
+    const repo = await register(d);
+    const { id } = (await d.call("POST", "/tasks", { repoId: repo.id, prompt: "x" })).json() as Task;
+    await d.runner.idle();
+    const record = d.store.getTask(id)!;
+    expect(record.envFiles).toEqual([".env"]);
+    expect(existsSync(join(record.worktreePath!, ".env"))).toBe(true);
+
+    const diff = DiffView.parse((await d.call("GET", `/tasks/${id}/diff`)).json());
+    expect(diff.files.map((f) => f.path)).toEqual(["a.txt"]);
+    expect(diff.patch).not.toContain(".env");
+    expect(diff.patch).not.toContain("hunter2");
   });
 
   it("does not fetch: works with an unreachable origin", async () => {

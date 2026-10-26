@@ -15,6 +15,10 @@ export type Repo = z.infer<typeof Repo>;
 export const AddRepoInput = z.object({ path: AbsolutePath });
 export type AddRepoInput = z.infer<typeof AddRepoInput>;
 
+/** Repo settings changed from the desktop app. */
+export const UpdateRepoInput = z.object({ bypassAllowed: z.boolean() });
+export type UpdateRepoInput = z.infer<typeof UpdateRepoInput>;
+
 /** The repo's `.coord/config.json`. Every field is optional so an empty file is valid. */
 export const RepoConfig = z.object({
   baseBranch: z.string().optional(),
@@ -31,3 +35,13 @@ export const RepoConfig = z.object({
     }),
 });
 export type RepoConfig = z.infer<typeof RepoConfig>;
+
+/** The config a new task in this repo would start with, read from its base branch (spec §7). */
+export const RepoConfigView = z.object({
+  baseBranch: z.string(),
+  config: RepoConfig,
+  /** `config.setup`, or the commands detected from the package manager when it has none. */
+  setup: z.array(z.string()),
+  setupSource: z.enum(["config", "detected"]),
+});
+export type RepoConfigView = z.infer<typeof RepoConfigView>;

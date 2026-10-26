@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Command, Option } from "commander";
 import type { CoordClient, DaemonEventListener } from "@coord/client";
+import { displayText, toolInputSummary } from "@coord/protocol";
 import { resolvePermission, resolveTaskId } from "./resolve-task";
 
 // `pnpm coord` runs this script from apps/cli; INIT_CWD is the directory the user ran it in.
@@ -30,49 +31,15 @@ const WATCH_END: Record<string, number> = {
   interrupted: 1,
 };
 
-/**
- * C0 and C1 control characters (other than tab and newline, which callers render) and format
- * characters (bidi overrides, zero-width and direction marks). Agent text and tool input reach the
- * terminal through here: an ESC sequence could erase or recolor part of a command the user is
- * about to allow, a bidi override reorder it, a zero-width character hide a difference.
- */
-const CONTROL = /(?![\t\n])[\p{Cc}\p{Cf}]/gu;
-const stripControl = (text: string) => text.replace(CONTROL, "");
-
-/**
- * One terminal-safe line of at most `max` characters. `cut: "middle"` keeps the end, for paths
- * whose file name is what the user must see (acceptance run 2, D3).
- */
-const oneLine = (text: string, max = 200, cut: "end" | "middle" = "end") => {
-  const flat = stripControl(text).replace(/\s+/g, " ").trim();
-  if (flat.length <= max) return flat;
-  if (cut === "end") return `${flat.slice(0, max - 1)}…`;
-  const tail = Math.ceil(((max - 1) * 2) / 3);
-  return `${flat.slice(0, max - 1 - tail)}…${flat.slice(-tail)}`;
+/** One terminal-safe line of at most `max` characters. */
+const oneLine = (text: string, max = 200) => {
+  const flat = displayText(text).replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 };
-
-/** Tools whose input names the file they change; the path is what the user must judge. */
-const FILE_TOOLS = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
-const SUMMARY_MAX = 120;
-
-/**
- * What a permission prompt would let the agent do, on one line (acceptance D2): the tool name
- * alone can't be judged. The Bash command, the file an edit writes, or else the input as JSON.
- * A newline shows as ⏎: a second line of a Bash command is a second command.
- */
-function inputSummary(p: Pick<PermissionRequestView, "tool" | "input">): string {
-  const input = (typeof p.input === "object" && p.input !== null ? p.input : {}) as Record<string, unknown>;
-  const pick = (...keys: string[]) =>
-    keys.map((k) => input[k]).find((v) => typeof v === "string") as string | undefined;
-  const path = FILE_TOOLS.includes(p.tool) ? pick("file_path", "notebook_path", "path") : undefined;
-  if (path !== undefined) return oneLine(path, SUMMARY_MAX, "middle");
-  const text = (p.tool === "Bash" ? pick("command") : undefined) ?? JSON.stringify(p.input) ?? "";
-  return oneLine(text.replace(/\r?\n/g, "⏎"), SUMMARY_MAX);
-}
 
 /** `<tool> <input summary>`: what a permission answer applies to. */
 function describeAction(p: Pick<PermissionRequestView, "tool" | "input">, sep = " "): string {
-  const summary = inputSummary(p);
+  const summary = toolInputSummary(p.tool, p.input);
   return `${oneLine(p.tool)}${summary ? `${sep}${summary}` : ""}`;
 }
 
@@ -92,9 +59,9 @@ function describePermission(p: PermissionRequestView, sep = " "): string {
  */
 function fullInput(input: unknown, indent: string): string[] {
   const escape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`;
-  return (JSON.stringify(input, null, 2) ?? "undefined")
-    .split("\n")
-    .map((l) => indent + l.replace(CONTROL, escape));
+  // Escaped wherever displayText would strip: the same characters, made visible.
+  const visible = (line: string) => [...line].map((c) => (displayText(c) === c ? c : escape(c))).join("");
+  return (JSON.stringify(input, null, 2) ?? "undefined").split("\n").map((l) => indent + visible(l));
 }
 
 /** A task parked by a failed commit: needs_input with an error and no agent waiting on a prompt. */
@@ -248,14 +215,14 @@ export function buildProgram(
         client.taskEvents(taskId),
         client.listPermissions(taskId),
       ]);
-      log(`${task.id}  ${stripControl(task.title)}`);
+      log(`${task.id}  ${displayText(task.title)}`);
       log(`status:   ${task.status}`);
       log(`branch:   ${task.branch ?? "-"}`);
       log(`worktree: ${task.worktreePath ?? "-"}`);
       log(
         `usage:    ${task.inputTokens} in / ${task.outputTokens} out tokens · $${task.costUsd.toFixed(4)} · ${task.turns} turns`,
       );
-      if (task.error) log(`error:    ${stripControl(task.error)}`);
+      if (task.error) log(`error:    ${displayText(task.error)}`);
       if (pending.length > 0) {
         log("pending permissions:");
         for (const p of pending) {
