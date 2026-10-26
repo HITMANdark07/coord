@@ -19,7 +19,17 @@ const home = coordHome();
 // Home holds the token file, the database and the worktrees (AGENTS.md rule 8). mkdir's mode
 // only applies to a new directory, so chmod repairs a home an older daemon created 0755.
 await mkdir(home, { recursive: true, mode: 0o700 });
-await chmod(home, 0o700);
+try {
+  await chmod(home, 0o700);
+} catch (error) {
+  // A home the user doesn't own (EPERM): say which directory and why, not a stack trace. The
+  // daemon never runs with a home it can't keep private.
+  const code = (error as NodeJS.ErrnoException).code ?? String(error);
+  console.error(
+    `coord: can't make ${home} owner-only (chmod 700 failed: ${code}); set COORD_HOME to a directory you own`,
+  );
+  process.exit(1);
+}
 // Take the lock before touching the database or the port: a second daemon on this COORD_HOME
 // must exit without opening anything.
 let lock: Awaited<ReturnType<typeof acquireDaemonLock>>;
