@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   CreateTaskInput,
@@ -19,6 +20,7 @@ import {
   createWorktree,
   deleteBranch,
   detectSetupCommands,
+  pruneWorktrees,
   readRepoConfig,
   removeWorktree,
   resolveBaseRef,
@@ -44,7 +46,15 @@ export interface TaskRunnerDeps {
    * apply (spec §6); tests pass a fixed identity because CI machines have none.
    */
   gitEnv?: Record<string, string>;
+  /**
+   * How long a cancel waits for the agent to stop after `interrupt()` before aborting the run.
+   * The interrupt is a request to the agent and can hang. Default 10 s; tests pass a short one.
+   */
+  stopGraceMs?: number;
 }
+
+const DEFAULT_STOP_GRACE_MS = 10_000;
+const SWEEP_ERROR = "branch cleanup failed: ";
 
 /** Statuses in which a task may hold an agent slot (spec §5 concurrency); see `holdsSlot`. */
 const ACTIVE_STATUSES: TaskStatus[] = ["setting_up", "running", "needs_input"];
@@ -90,6 +100,11 @@ interface Live {
   run?: AgentRun;
   /** The turn's events are over and endTurn is committing: a message now waits for the turn end. */
   ending?: boolean;
+  /**
+   * Turns the run still owes: the current one plus one per message `send()` accepted, since the
+   * agent runs each accepted message as its own turn. The task reaches review only at zero.
+   */
+  outstanding: number;
   /** Resolves once start() is done with the task: the turn ended (or setup stopped) and live is gone. */
   finished: Promise<void>;
 }
@@ -238,6 +253,7 @@ export class TaskRunner {
         await live.finished;
         return this.message(taskId, text);
       }
+      live.outstanding++;
       return task;
     }
     if (this.isResting(task)) return this.followUp(task, text);
@@ -247,14 +263,19 @@ export class TaskRunner {
   /** Stops the current turn. The adapter reports it as `done`, so the turn ends as review (spec §5). */
   async interrupt(taskId: string): Promise<TaskRecord> {
     const task = this.getOpen(taskId);
-    const run = this.live.get(taskId)?.run;
-    if (!run || (task.status !== "running" && task.status !== "needs_input")) {
+    const live = this.live.get(taskId);
+    const run = live?.run;
+    if (!live || !run || (task.status !== "running" && task.status !== "needs_input")) {
       throw new RunnerError("conflict", `task is ${task.status}; there is no turn to interrupt`);
     }
+    // The user asked to stop, so the turn in progress is the last one. Messages queued with
+    // send() never run: that turn's end calls run.end(), which drops the session's queued input.
+    live.outstanding = 1;
     const stopping = run.interrupt();
     // An agent waiting on a prompt gets no answer now; clients drop the prompt.
     this.deps.broker.withdrawAll(taskId);
-    await stopping;
+    // A hung interrupt must not hang the caller; cancel is the way to force a stop.
+    await this.withinGrace(stopping);
     return this.deps.store.getTask(taskId) ?? task;
   }
 
@@ -331,12 +352,16 @@ export class TaskRunner {
         const branch = task.branch;
         try {
           await this.withRepoLock(task.repoId, () => deleteBranch(task.repoPath, branch));
-        } catch {
-          // Already gone (deleted by hand) is fine; otherwise keep it and try again next sweep.
-          if (await localBranchExists(task.repoPath, branch)) continue;
+        } catch (e) {
+          // Already gone (deleted by hand) is fine. Otherwise the task says why, and the next
+          // sweep tries again.
+          if (await localBranchExists(task.repoPath, branch)) {
+            this.transition(task.id, "cancelled", { error: SWEEP_ERROR + gitMessage(e) });
+            continue;
+          }
         }
       }
-      this.transition(task.id, "cleaned_up");
+      this.transition(task.id, "cleaned_up", task.error?.startsWith(SWEEP_ERROR) ? { error: null } : {});
       count++;
     }
     return count;
@@ -372,7 +397,11 @@ export class TaskRunner {
 
   private async start(task: TaskRecord): Promise<void> {
     let finish!: () => void;
-    const live: Live = { abort: new AbortController(), finished: new Promise((r) => (finish = r)) };
+    const live: Live = {
+      abort: new AbortController(),
+      finished: new Promise((r) => (finish = r)),
+      outstanding: 1,
+    };
     this.live.set(task.id, live);
     try {
       // A follow-up reuses the worktree as the agent left it. Setup runs again only if the agent
@@ -400,38 +429,43 @@ export class TaskRunner {
     const repo = store.getRepo(task.repoId);
     if (!repo) return this.fail(task.id, "setup: repo is no longer registered");
     try {
-      const { config, baseBranch, branch, worktreePath } = await this.withRepoLock(repo.id, async () => {
-        if (task.worktreePath !== null && task.branch !== null && task.baseBranch !== null) {
-          // Setup again in the worktree it already made; its config from the same base (spec §7).
-          const { ref } = await resolveBaseRef(repo.path, task.baseBranch);
-          const config = await readRepoConfig(repo.path, ref);
-          return {
-            config,
-            baseBranch: task.baseBranch,
-            branch: task.branch,
-            worktreePath: task.worktreePath,
-          };
-        }
-        let baseBranch = task.baseBranch ?? repo.defaultBranch;
-        let { ref } = await resolveBaseRef(repo.path, baseBranch);
-        // setup/checks come from the base ref, never the task branch (spec §7).
-        let config = await readRepoConfig(repo.path, ref);
-        // Without an explicit base, the config's baseBranch picks it (spec §7). Its setup and
-        // checks are then read again from that base, the one the task actually starts from.
-        if (task.baseBranch === null && config.baseBranch && config.baseBranch !== baseBranch) {
-          baseBranch = config.baseBranch;
-          ({ ref } = await resolveBaseRef(repo.path, baseBranch));
-          config = await readRepoConfig(repo.path, ref);
-        }
-        const branch = task.branch ?? (await uniqueBranch(repo.path, BRANCH_PREFIX + slugify(task.title)));
-        const dir = branch.slice(BRANCH_PREFIX.length).replaceAll("/", "-");
-        const worktreePath = join(home, "worktrees", `${repo.name}-${repo.id}`, dir);
-        await createWorktree({ repoPath: repo.path, worktreePath, branch, baseRef: ref });
-        return { config, baseBranch, branch, worktreePath };
-      });
+      const { config, baseBranch, branch, worktreePath, retry } = await this.withRepoLock(
+        repo.id,
+        async () => {
+          if (task.worktreePath !== null && task.branch !== null && task.baseBranch !== null) {
+            // Setup again in the worktree it already made; its config from the same base (spec §7).
+            const { ref } = await resolveBaseRef(repo.path, task.baseBranch);
+            const config = await readRepoConfig(repo.path, ref);
+            return {
+              config,
+              baseBranch: task.baseBranch,
+              branch: task.branch,
+              worktreePath: task.worktreePath,
+              retry: true,
+            };
+          }
+          let baseBranch = task.baseBranch ?? repo.defaultBranch;
+          let { ref } = await resolveBaseRef(repo.path, baseBranch);
+          // setup/checks come from the base ref, never the task branch (spec §7).
+          let config = await readRepoConfig(repo.path, ref);
+          // Without an explicit base, the config's baseBranch picks it (spec §7). Its setup and
+          // checks are then read again from that base, the one the task actually starts from.
+          if (task.baseBranch === null && config.baseBranch && config.baseBranch !== baseBranch) {
+            baseBranch = config.baseBranch;
+            ({ ref } = await resolveBaseRef(repo.path, baseBranch));
+            config = await readRepoConfig(repo.path, ref);
+          }
+          const branch = task.branch ?? (await uniqueBranch(repo.path, BRANCH_PREFIX + slugify(task.title)));
+          const dir = branch.slice(BRANCH_PREFIX.length).replaceAll("/", "-");
+          const worktreePath = join(home, "worktrees", `${repo.name}-${repo.id}`, dir);
+          await createWorktree({ repoPath: repo.path, worktreePath, branch, baseRef: ref });
+          return { config, baseBranch, branch, worktreePath, retry: false };
+        },
+      );
       // Recorded right away so a later failure or restart still knows where the work is.
       store.updateTask(task.id, { branch, baseBranch, worktreePath });
-      await copyEnvFiles(repo.path, worktreePath, config.envFiles);
+      // On a retry the user may have fixed an env file in the worktree: keep theirs.
+      await copyEnvFiles(repo.path, worktreePath, config.envFiles, { skipExisting: retry });
       const portBase = store.allocatePortBase(task.id, config.ports.start, config.ports.blockSize);
       const commands = config.setup ?? (await detectSetupCommands(worktreePath));
       const result = await runCommands(commands, {
@@ -500,6 +534,12 @@ export class TaskRunner {
           });
           break;
         case "done":
+          // A message sent during the turn runs as the next turn of the same run (see
+          // `outstanding`); each turn gets its own commit as it ends (spec §6).
+          if (--live.outstanding > 0) {
+            await this.commitMidRun(taskId);
+            break;
+          }
           return this.endTurn(taskId, live, run);
         case "error":
           return this.endTurn(taskId, live, run, event.message);
@@ -520,13 +560,7 @@ export class TaskRunner {
     const turns = task.turns + 1;
     let commitError: string | undefined;
     try {
-      await commitTurn({
-        cwd: task.worktreePath as string,
-        branch: task.branch as string,
-        message: `${task.title} (turn ${turns})`,
-        trailers: this.trailers(task),
-        env: this.deps.gitEnv,
-      });
+      await this.commitWork(task, turns);
     } catch (e) {
       commitError = gitMessage(e);
     } finally {
@@ -548,6 +582,47 @@ export class TaskRunner {
       this.transition(taskId, "failed", { turns, error: failure });
     } else {
       this.transition(taskId, "review", { turns, error: null });
+    }
+  }
+
+  /**
+   * A turn ended but the run goes on with a sent message. The commit failing doesn't stop the
+   * agent: the error shows, and the next turn end commits the same work or parks the task.
+   */
+  private async commitMidRun(taskId: string): Promise<void> {
+    const task = this.get(taskId);
+    const turns = task.turns + 1;
+    let error: string | null = null;
+    try {
+      await this.commitWork(task, turns);
+    } catch (e) {
+      error = `commit failed (turn ${turns}): ${gitMessage(e)}. The next turn end tries again.`;
+    }
+    // The status stays: the agent is already on its next turn (running, or needs_input on a prompt).
+    this.transition(taskId, this.get(taskId).status as TaskStatus, { turns, error });
+  }
+
+  /** The per-turn checkpoint commit (spec §6): one place for its message, trailers and identity. */
+  private commitWork(task: TaskRecord, turn: number) {
+    return commitTurn({
+      cwd: task.worktreePath as string,
+      branch: task.branch as string,
+      message: `${task.title} (turn ${turn})`,
+      trailers: this.trailers(task),
+      env: this.deps.gitEnv,
+    });
+  }
+
+  /** Resolves true if `p` settles within the stop grace period, false once it runs out. */
+  private async withinGrace(p: Promise<unknown>): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), this.deps.stopGraceMs ?? DEFAULT_STOP_GRACE_MS);
+    });
+    try {
+      return await Promise.race([p.then(() => true), timeout]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -577,10 +652,20 @@ export class TaskRunner {
     if (!live) return;
     if (live.run) {
       const run = live.run;
+      live.outstanding = 1;
       this.deps.broker.withdrawAll(taskId);
       // The interrupt ends the turn the normal way, so endTurn commits what the agent left.
-      await run.interrupt().catch(() => undefined);
-      run.end();
+      const stopped = (async () => {
+        await run.interrupt().catch(() => undefined);
+        run.end();
+        await live.finished;
+      })();
+      if (!(await this.withinGrace(stopped))) {
+        // The interrupt hung: abort the run. The adapter reports that as an `error`, and that
+        // turn end still commits the work before the discard.
+        live.abort.abort();
+        run.end();
+      }
     } else {
       live.abort.abort();
     }
@@ -596,23 +681,25 @@ export class TaskRunner {
     const { worktreePath, branch } = task;
     if (worktreePath !== null && branch !== null) {
       try {
-        // A task parked by a failed commit retries that turn's commit; otherwise the work is
-        // newer than the last counted turn.
-        const turn = task.status === "needs_input" && !this.live.has(taskId) ? task.turns : task.turns + 1;
-        await commitTurn({
-          cwd: worktreePath,
-          branch,
-          message: `${task.title} (turn ${Math.max(turn, 1)})`,
-          trailers: this.trailers(task),
-          env: this.deps.gitEnv,
-        });
-        await this.withRepoLock(task.repoId, () => removeWorktree(task.repoPath, worktreePath));
+        if (existsSync(worktreePath)) {
+          // A task parked by a failed commit retries that turn's commit; otherwise the work is
+          // newer than the last counted turn.
+          const turn = task.status === "needs_input" && !this.live.has(taskId) ? task.turns : task.turns + 1;
+          await this.commitWork(task, Math.max(turn, 1));
+          await this.withRepoLock(task.repoId, () => removeWorktree(task.repoPath, worktreePath));
+        } else {
+          // Deleted by hand: nothing on disk to commit or lose; git only has to forget it.
+          await this.withRepoLock(task.repoId, () => pruneWorktrees(task.repoPath));
+        }
       } catch (e) {
-        const error = `discard failed: ${gitMessage(e)}. The work is still in ${worktreePath}`;
         const current = this.get(taskId);
+        // A queued follow-up won't run now; keep its text where the user sees it.
+        const unsent =
+          current.pendingMessage === null ? "" : ` Unsent follow-up: "${current.pendingMessage}"`;
+        const error = `discard failed: ${gitMessage(e)}. The work is still in ${worktreePath}.${unsent}`;
         // A cancel can fail from a working status; failed is the resting state that says so.
         const rest = RESTING_STATUSES.includes(current.status as TaskStatus) ? current.status : "failed";
-        this.transition(taskId, rest as TaskStatus, { error });
+        this.transition(taskId, rest as TaskStatus, { error, pendingMessage: null });
         throw new RunnerError("conflict", error);
       }
     }

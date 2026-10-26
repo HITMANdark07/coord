@@ -11,7 +11,7 @@ import { EventBus } from "../event-bus";
 import { PermissionBroker } from "../permission-broker";
 import { RunnerError } from "./errors";
 import { TaskRunner } from "./task-runner";
-import { fakeAdapter, type FakeStep } from "./testing";
+import { fakeAdapter, type FakeAdapterOptions, type FakeStep } from "./testing";
 
 const cleanup: string[] = [];
 afterEach(async () => {
@@ -51,10 +51,16 @@ async function noIdentityGitEnv(): Promise<Record<string, string>> {
 }
 
 /** One daemon process: a runner with its own bus, broker and agent, on a shared store and home. */
+interface BootOptions {
+  maxConcurrent?: number;
+  fake?: FakeAdapterOptions;
+  stopGraceMs?: number;
+}
+
 function boot(
   env: { store: Store; home: string; gitEnv: Record<string, string> },
   script: FakeStep[],
-  opts: { maxConcurrent?: number } = {},
+  opts: BootOptions = {},
 ) {
   const { store, home, gitEnv } = env;
   const bus = new EventBus();
@@ -67,7 +73,7 @@ function boot(
     bus,
     onPendingChange: (t, c) => runner?.onPendingChange(t, c),
   });
-  const adapter = fakeAdapter(script);
+  const adapter = fakeAdapter(script, opts.fake);
   runner = new TaskRunner({
     store,
     bus,
@@ -76,6 +82,7 @@ function boot(
     home,
     maxConcurrent: opts.maxConcurrent ?? 3,
     gitEnv,
+    ...(opts.stopGraceMs !== undefined ? { stopGraceMs: opts.stopGraceMs } : {}),
   });
   const statuses = (taskId: string) =>
     events.flatMap((e) =>
@@ -84,10 +91,7 @@ function boot(
   return { bus, broker, adapter, events, statuses, runner: runner as TaskRunner };
 }
 
-async function setup(
-  script: FakeStep[],
-  opts: { maxConcurrent?: number; gitEnv?: Record<string, string> } = {},
-) {
+async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<string, string> } = {}) {
   const repo = await makeTempRepo();
   cleanup.push(dirname(repo.path));
   const home = await mkdtemp(join(tmpdir(), "coord-runner-home-"));
@@ -121,6 +125,81 @@ describe("TaskRunner lifecycle", () => {
       taskId: task.id,
       event: { type: "text", text: "received: use tabs" },
     });
+    expect(store.getTask(task.id)!.status).toBe("review");
+  });
+
+  it("a live message runs as its own turn and is committed", async () => {
+    const { store, runner, create, events, commits } = await setup(
+      [session, edit("a.txt"), waitForMessage, done],
+      {
+        fake: {
+          messageTurn: (m) => [edit("b.txt"), { event: { type: "text", text: `received: ${m}` } }, done],
+        },
+      },
+    );
+    const task = await create();
+    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
+
+    await runner.message(task.id, "add b");
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("review");
+    expect(t.turns).toBe(2);
+    expect(commits(t.branch!)).toEqual(["Fix it (turn 1)", "Fix it (turn 2)"]);
+    expect(git(t.worktreePath!, "show", "HEAD:b.txt")).toBe("b.txt from the agent\n");
+    // Between the two turn ends the task is still running (turn 1 recorded); review only after.
+    const log = events.flatMap((e) => {
+      const p = e.payload;
+      if (p.kind === "agent.event" && p.taskId === task.id && p.event.type === "done") return ["done"];
+      if (p.kind === "task.updated" && p.task.id === task.id) return [`${p.task.status}:${p.task.turns}`];
+      return [];
+    });
+    const between = log.slice(log.indexOf("done") + 1, log.lastIndexOf("done"));
+    expect(between).toEqual(["running:1"]);
+    expect(log.slice(log.lastIndexOf("done") + 1)).toEqual(["review:2"]);
+  });
+
+  it("interrupt with a queued live message ends at the current turn", async () => {
+    const { store, broker, runner, adapter, create, events, commits } = await setup([
+      edit("a.txt"),
+      waitForMessage,
+      { permission },
+      done,
+    ]);
+    const task = await create();
+    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
+    await runner.message(task.id, "more");
+    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
+
+    await runner.interrupt(task.id);
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("review");
+    expect(t.turns).toBe(1);
+    expect(adapter.calls.send).toEqual(["more"]);
+    expect(commits(t.branch!)).toEqual(["Fix it (turn 1)"]);
+    const texts = events.flatMap((e) =>
+      e.payload.kind === "agent.event" && e.payload.event.type === "text" ? [e.payload.event.text] : [],
+    );
+    expect(texts).not.toContain("received: more");
+  });
+
+  it("a message the session refuses waits for the turn end and resumes with it", async () => {
+    const { store, broker, runner, adapter, create } = await setup([session, { permission }, done], {
+      fake: { refuseSends: true },
+    });
+    const task = await create();
+    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
+
+    const sent = runner.message(task.id, "use tabs");
+    broker.answer(broker.pending(task.id)[0]!.id, { allow: true });
+    await sent;
+    await runner.idle();
+
+    expect(adapter.calls.send).toEqual([]);
+    expect(adapter.calls.resume).toMatchObject([{ sessionId: "s-1", message: "use tabs" }]);
     expect(store.getTask(task.id)!.status).toBe("review");
   });
 
@@ -316,7 +395,10 @@ describe("TaskRunner lifecycle", () => {
     await writeFile(join(repo.path, "setup.sh"), "test -f ok || exit 3\necho ran > setup-ran.txt\n");
     const configDir = join(repo.path, ".coord");
     execFileSync("mkdir", ["-p", configDir]);
-    await writeFile(join(configDir, "config.json"), JSON.stringify({ setup: ["sh setup.sh"] }));
+    await writeFile(
+      join(configDir, "config.json"),
+      JSON.stringify({ setup: ["sh setup.sh"], envFiles: [".env"] }),
+    );
     execFileSync("git", ["add", "-A"], { cwd: repo.path, env: { ...process.env, ...repo.env } });
     execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "setup"], {
       cwd: repo.path,
@@ -328,6 +410,9 @@ describe("TaskRunner lifecycle", () => {
     expect(t.status).toBe("failed");
     expect(adapter.calls.start).toHaveLength(0);
 
+    // The user's own env file stays out of git; the user fixes the worktree's copy.
+    await writeFile(join(repo.path, ".env"), "TOKEN=old\n");
+    await writeFile(join(t.worktreePath!, ".env"), "TOKEN=fixed\n");
     await writeFile(join(t.worktreePath!, "ok"), "");
     await runner.resume(task.id);
     await runner.idle();
@@ -336,6 +421,7 @@ describe("TaskRunner lifecycle", () => {
     expect(t.status).toBe("review");
     expect(adapter.calls.start).toHaveLength(1);
     expect(git(t.worktreePath!, "show", "HEAD:setup-ran.txt")).toBe("ran\n");
+    expect(await readFile(join(t.worktreePath!, ".env"), "utf8")).toBe("TOKEN=fixed\n");
   });
 
   it("discard keeps the work on the branch and removes the worktree", async () => {
@@ -493,6 +579,64 @@ describe("TaskRunner lifecycle", () => {
     expect(adapter.calls.start).toEqual([]);
   });
 
+  it("cancel still finishes when the agent's interrupt hangs", async () => {
+    const { repo, store, runner, create, commits } = await setup([edit("a.txt"), waitForMessage, done], {
+      fake: { hangInterrupt: true },
+      stopGraceMs: 20,
+    });
+    const task = await create();
+    const wt = () => store.getTask(task.id)!.worktreePath ?? "/nope";
+    await vi.waitFor(() => expect(existsSync(join(wt(), "a.txt"))).toBe(true));
+    const before = store.getTask(task.id)!;
+
+    const t = await runner.cancel(task.id);
+    await runner.idle();
+
+    expect(t.status).toBe("cancelled");
+    expect(existsSync(before.worktreePath!)).toBe(false);
+    expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
+    expect(git(repo.path, "show", `${before.branch}:a.txt`)).toBe("a.txt from the agent\n");
+  });
+
+  it("discard of a worktree deleted by hand prunes it and keeps the branch", async () => {
+    const { repo, store, runner, create, commits } = await setup([edit("a.txt"), done]);
+    const task = await create();
+    await runner.idle();
+    const before = store.getTask(task.id)!;
+    await rm(before.worktreePath!, { recursive: true, force: true });
+
+    const t = await runner.discard(task.id);
+
+    expect(t.status).toBe("cancelled");
+    expect(git(repo.path, "worktree", "list")).not.toContain(before.worktreePath!);
+    expect(commits(before.branch!)).toEqual(["Fix it (turn 1)"]);
+  });
+
+  it("a failed cancel of a queued follow-up keeps its text in the error", async () => {
+    const gitEnv = await noIdentityGitEnv();
+    const { store, broker, runner, create } = await setup([{ permission }, edit("a.txt"), done], {
+      maxConcurrent: 1,
+      gitEnv,
+    });
+    const a = await create();
+    await vi.waitFor(() => expect(broker.pending(a.id)).toHaveLength(1));
+    broker.answer(broker.pending(a.id)[0]!.id, { allow: true });
+    const b = await create();
+    // A parks (its commit fails); B takes the only slot and waits on its prompt.
+    await vi.waitFor(() => expect(broker.pending(b.id)).toHaveLength(1));
+    await runner.message(a.id, "please also update the docs");
+    expect(store.getTask(a.id)!.status).toBe("queued");
+
+    await expect(runner.cancel(a.id)).rejects.toMatchObject({ code: "conflict" });
+
+    const t = store.getTask(a.id)!;
+    expect(t.status).toBe("failed");
+    expect(t.pendingMessage).toBeNull();
+    expect(t.error).toContain("please also update the docs");
+    expect(await readFile(join(t.worktreePath!, "a.txt"), "utf8")).toBe("a.txt from the agent\n");
+    await runner.cancel(b.id);
+  });
+
   it("cancel from queued goes straight to cancelled", async () => {
     const { store, runner, create, statuses } = await setup([waitForMessage, done], { maxConcurrent: 1 });
     const a = await create();
@@ -529,6 +673,32 @@ describe("TaskRunner lifecycle", () => {
     expect(store.getTask(recent.id)!.status).toBe("cancelled");
     // Already swept: nothing left to do.
     expect(await runner.sweepDiscardedBranches(now)).toBe(0);
+  });
+
+  it("a sweep that can't delete a branch says so and retries next time", async () => {
+    const { repo, store, runner, create, events } = await setup([edit("a.txt"), done]);
+    const task = await create({ title: "Old" });
+    await runner.idle();
+    await runner.discard(task.id);
+    const now = new Date();
+    store.updateTask(task.id, { discardedAt: new Date(now.getTime() - 15 * DAY).toISOString() });
+    // A branch checked out in some worktree can't be deleted.
+    const elsewhere = join(dirname(repo.path), "elsewhere");
+    git(repo.path, "worktree", "add", elsewhere, "agent/old");
+
+    expect(await runner.sweepDiscardedBranches(now)).toBe(0);
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("cancelled");
+    expect(t.error).toMatch(/^branch cleanup failed: /);
+    expect(events.map((e) => e.payload)).toContainEqual({
+      kind: "task.updated",
+      task: expect.objectContaining({ id: task.id, error: t.error }),
+    });
+
+    git(repo.path, "worktree", "remove", elsewhere);
+    expect(await runner.sweepDiscardedBranches(now)).toBe(1);
+    expect(store.getTask(task.id)).toMatchObject({ status: "cleaned_up", error: null });
   });
 
   it("actions in the wrong status are conflicts", async () => {

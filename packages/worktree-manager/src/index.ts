@@ -2,7 +2,14 @@
 export { GitError } from "./git";
 export { ConfigError, readRepoConfig, readRepoInfo, resolveBaseRef } from "./repo";
 export { slugify } from "./slug";
-export { copyEnvFiles, createWorktree, deleteBranch, removeWorktree, uniqueBranch } from "./worktree";
+export {
+  copyEnvFiles,
+  createWorktree,
+  deleteBranch,
+  pruneWorktrees,
+  removeWorktree,
+  uniqueBranch,
+} from "./worktree";
 export { detectSetupCommands, runCommands } from "./commands";
 export type { RunResult } from "./commands";
 export { CommitError, commitTurn, hasChanges } from "./commit";

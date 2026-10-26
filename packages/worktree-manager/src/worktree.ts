@@ -2,6 +2,15 @@ import { access, copyFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 import { GitError, git } from "./git";
 
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function refExists(repoPath: string, ref: string): Promise<boolean> {
   try {
     await git(["rev-parse", "--verify", "--quiet", ref], { cwd: repoPath });
@@ -39,6 +48,8 @@ export async function copyEnvFiles(
   repoPath: string,
   worktreePath: string,
   files: string[],
+  /** Leave a file the worktree already has: on a setup retry the user may have fixed it there. */
+  opts: { skipExisting?: boolean } = {},
 ): Promise<string[]> {
   const copied: string[] = [];
   for (const file of files) {
@@ -50,6 +61,7 @@ export async function copyEnvFiles(
     } catch {
       continue;
     }
+    if (opts.skipExisting && (await exists(join(worktreePath, rel)))) continue;
     await mkdir(dirname(join(worktreePath, rel)), { recursive: true });
     await copyFile(join(repoPath, rel), join(worktreePath, rel));
     copied.push(file);
@@ -60,6 +72,11 @@ export async function copyEnvFiles(
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
   // No --force: git refuses a worktree with changes, which is the point (never lose work).
   await git(["worktree", "remove", worktreePath], { cwd: repoPath });
+}
+
+/** Drops git's record of worktrees whose directory no longer exists. Branches are untouched. */
+export async function pruneWorktrees(repoPath: string): Promise<void> {
+  await git(["worktree", "prune"], { cwd: repoPath });
 }
 
 export async function deleteBranch(repoPath: string, branch: string): Promise<void> {

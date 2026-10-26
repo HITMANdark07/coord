@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   createWorktree,
   deleteBranch,
   detectSetupCommands,
+  pruneWorktrees,
   readRepoConfig,
   readRepoInfo,
   removeWorktree,
@@ -122,6 +123,18 @@ describe("worktrees", () => {
     expect(existsSync(join(b, ".env.missing"))).toBe(false);
   });
 
+  it("copyEnvFiles with skipExisting keeps env files already in the worktree", async () => {
+    const a = await tmp();
+    const b = await tmp();
+    await writeFile(join(a, ".env"), "A=from-checkout\n");
+    await writeFile(join(a, ".env.local"), "B=2\n");
+    await writeFile(join(b, ".env"), "A=fixed-by-user\n");
+    const copied = await copyEnvFiles(a, b, [".env", ".env.local"], { skipExisting: true });
+    expect(copied).toEqual([".env.local"]);
+    expect(await readFile(join(b, ".env"), "utf8")).toBe("A=fixed-by-user\n");
+    expect(await readFile(join(b, ".env.local"), "utf8")).toBe("B=2\n");
+  });
+
   it("runCommands stops at the first failure with output", async () => {
     const d = await tmp();
     const r = await runCommands(["true", "echo boom; exit 3", "touch never"], { cwd: d, env: {} });
@@ -159,5 +172,16 @@ describe("worktrees", () => {
     expect(git(path, env, "branch", "--list", "main")).toContain("main");
     await deleteBranch(path, "agent/r");
     expect(git(path, env, "branch", "--list", "agent/r")).toBe("");
+  });
+
+  it("pruneWorktrees forgets a worktree whose directory is gone, keeping its branch", async () => {
+    const { path, env } = await makeTempRepo();
+    const wt = join(await tmp(), "wt");
+    await createWorktree({ repoPath: path, worktreePath: wt, branch: "agent/p", baseRef: "main" });
+    await rm(wt, { recursive: true, force: true });
+    expect(git(path, env, "worktree", "list")).toContain(wt);
+    await pruneWorktrees(path);
+    expect(git(path, env, "worktree", "list")).not.toContain(wt);
+    expect(git(path, env, "branch", "--list", "agent/p")).toContain("agent/p");
   });
 });
