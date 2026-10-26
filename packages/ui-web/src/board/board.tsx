@@ -37,7 +37,7 @@ export function Board({
       ? (agents.data.find((a) => a.id === agent)?.costReporting ?? false)
       : agent === "claude-code";
 
-  const data = tasks.status === "ok" ? tasks.data : [];
+  const data = tasks.status === "loading" ? [] : (tasks.data ?? []);
   const groups = groupTasks(data, { now, showClosed });
   const pending = permissions.status === "ok" ? permissions.data : [];
 
@@ -46,11 +46,11 @@ export function Board({
       <header style={{ display: "flex", alignItems: "center", gap: space.md, marginBottom: space.lg }}>
         {repoSwitcher}
         <span style={{ color: c.muted, fontSize: fontSize.sm }}>
-          {tasks.status === "ok" ? boardSummary(data) : ""}
+          {tasks.status === "loading" ? "" : boardSummary(data)}
         </span>
         <button onClick={onNewTask}>+ New task</button>
       </header>
-      {tasks.status === "error" && <p role="alert">Could not load tasks: {tasks.error}</p>}
+      {tasks.status === "error" && <p role="alert">Could not load tasks: {displayText(tasks.error)}</p>}
       <div style={{ display: "flex", gap: space.sm, alignItems: "flex-start" }}>
         {COLUMNS.filter((col) => col.id !== "closed" || showClosed).map((col) => (
           <div key={col.id} style={{ flex: 1, minWidth: 0 }}>

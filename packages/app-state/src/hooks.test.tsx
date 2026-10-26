@@ -63,6 +63,23 @@ describe("app-state hooks", () => {
     await waitFor(() => expect(result.current).toEqual({ status: "error", error: "daemon down" }));
   });
 
+  it("a failed refresh keeps the last data", async () => {
+    let fail = false;
+    const transport = fakeTransport(() => {
+      if (fail) throw new Error("daemon down");
+      return [task];
+    });
+    const { result } = renderHook(() => useTasks(undefined, 60_000), {
+      wrapper: wrapperFor(createClient(transport)),
+    });
+    await waitFor(() => expect(result.current).toEqual({ status: "ok", data: [task] }));
+    fail = true;
+    act(() => transport.setStatus("open"));
+    await waitFor(() =>
+      expect(result.current).toEqual({ status: "error", error: "daemon down", data: [task] }),
+    );
+  });
+
   it("reloads tasks when the daemon pushes a task event", async () => {
     let tasks: Task[] = [];
     const transport = fakeTransport(() => tasks);

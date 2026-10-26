@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -100,6 +100,27 @@ describe("Board", () => {
     expect(screen.queryByText("Task c")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "show closed" }));
     expect(await screen.findByText("Task c")).toBeTruthy();
+  });
+
+  it("a failed poll keeps the cards on the board", async () => {
+    let fail = false;
+    const transport = fakeTransport((req) => {
+      if (req.path.startsWith("/tasks")) {
+        if (fail) throw new Error("daemon down");
+        return [mk("a", "running")];
+      }
+      return req.path === "/agents" ? [] : [];
+    });
+    render(
+      <ClientProvider client={createClient(transport)}>
+        <Board onOpen={() => {}} onNewTask={() => {}} />
+      </ClientProvider>,
+    );
+    await screen.findByText("Task a");
+    fail = true;
+    act(() => transport.setStatus("open"));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText("Task a")).toBeTruthy();
   });
 
   it("a card click opens the task", async () => {

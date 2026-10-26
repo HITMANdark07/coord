@@ -3,7 +3,10 @@ import type { DaemonEvent } from "@coord/protocol";
 import { useClient } from "./client-context";
 
 export type QueryState<T> =
-  { status: "loading" } | { status: "ok"; data: T } | { status: "error"; error: string };
+  | { status: "loading" }
+  | { status: "ok"; data: T }
+  // `data` is the last good result of the same load, kept so one failed poll doesn't empty the screen.
+  | { status: "error"; error: string; data?: T };
 
 /**
  * Loads data and keeps it fresh: reloads when a matching daemon event arrives or the event
@@ -43,9 +46,14 @@ export function useLiveQuery<T>(
         if (active) setHeld({ load, state: { status: "ok", data } });
       } catch (err) {
         if (active) {
-          setHeld({
-            load,
-            state: { status: "error", error: err instanceof Error ? err.message : String(err) },
+          const error = err instanceof Error ? err.message : String(err);
+          setHeld((h) => {
+            const last = h.load === load ? h.state : undefined;
+            const data = last?.status === "loading" ? undefined : last?.data;
+            return {
+              load,
+              state: data === undefined ? { status: "error", error } : { status: "error", error, data },
+            };
           });
         }
       }

@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { colors, space } from "@coord/design-tokens";
+import { displayText } from "@coord/protocol";
 
 /** Without this a render error leaves a blank window (PRD: never a blank screen). */
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -15,7 +16,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     return (
       <div role="alert" style={{ padding: space.xl, color: colors.light.text }}>
         <h2>Something went wrong</h2>
-        <p>{error.message}</p>
+        <p>{displayText(error.message)}</p>
         <button onClick={() => this.setState({ error: null })}>Reload</button>
       </div>
     );
