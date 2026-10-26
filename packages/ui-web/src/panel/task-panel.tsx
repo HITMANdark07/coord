@@ -3,6 +3,8 @@ import { useAction, useClient, useTask } from "@coord/app-state";
 import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
 import { displayText, type Task } from "@coord/protocol";
 import { agentLabel } from "../format";
+import { ChecksTab } from "./checks-tab";
+import { DiffTab } from "./diff-tab";
 import { LiveTab } from "./live-tab";
 
 const c = colors.light;
@@ -98,8 +100,13 @@ export function TaskPanel({
               </button>
             ))}
           </div>
-          {/* Task 6 replaces the Diff and Checks placeholders. */}
-          {tab === "Live" ? <LiveTab task={task} /> : <p style={{ color: c.muted }}>{tab} coming next</p>}
+          {tab === "Live" ? (
+            <LiveTab task={task} />
+          ) : tab === "Diff" ? (
+            <DiffTab task={task} />
+          ) : (
+            <ChecksTab task={task} />
+          )}
         </>
       ) : (
         query?.status === "loading" && <p>Loading…</p>
