@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Command, Option } from "commander";
 import type { CoordClient, DaemonEventListener } from "@coord/client";
-import { resolveTaskId } from "./resolve-task";
+import { resolvePermissionId, resolveTaskId } from "./resolve-task";
 
 // `pnpm coord` runs this script from apps/cli; INIT_CWD is the directory the user ran it in.
 const userCwd = () => process.env.INIT_CWD ?? process.cwd();
@@ -17,6 +17,8 @@ export interface ProgramDeps {
 }
 
 type DaemonEvent = Parameters<NonNullable<DaemonEventListener["onEvent"]>>[0];
+type Task = Awaited<ReturnType<CoordClient["getTask"]>>;
+type PermissionRequestView = Awaited<ReturnType<CoordClient["listPermissions"]>>[number];
 
 /** Statuses `coord watch` stops at, with the exit code each gives. */
 const WATCH_END: Record<string, number> = {
@@ -33,6 +35,43 @@ const oneLine = (text: string, max = 200) => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
+/** Tools whose input names the file they change; the path is what the user must judge. */
+const FILE_TOOLS = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
+const SUMMARY_MAX = 120;
+
+/**
+ * What a permission prompt would let the agent do, on one line (acceptance D2): the tool name
+ * alone can't be judged. The Bash command, the file an edit writes, or else the input as JSON.
+ */
+function inputSummary(p: Pick<PermissionRequestView, "tool" | "input">): string {
+  const input = (typeof p.input === "object" && p.input !== null ? p.input : {}) as Record<string, unknown>;
+  const pick = (...keys: string[]) =>
+    keys.map((k) => input[k]).find((v) => typeof v === "string") as string | undefined;
+  const text =
+    (p.tool === "Bash" ? pick("command") : undefined) ??
+    (FILE_TOOLS.includes(p.tool) ? pick("file_path", "notebook_path", "path") : undefined) ??
+    JSON.stringify(p.input) ??
+    "";
+  return oneLine(text, SUMMARY_MAX);
+}
+
+/** `<tool> <input summary> (<title>)`, plus whether `coord allow --always` applies. */
+function describePermission(p: PermissionRequestView, sep = " "): string {
+  const summary = inputSummary(p);
+  return (
+    `${p.tool}${summary ? `${sep}${summary}` : ""}` +
+    `${p.title ? `${sep}(${oneLine(p.title)})` : ""}` +
+    `${p.canRemember ? "  [--always available]" : ""}`
+  );
+}
+
+/** A task parked by a failed commit: needs_input with an error and no agent waiting on a prompt. */
+async function parkedError(client: CoordClient, task: Task): Promise<string | undefined> {
+  if (task.status !== "needs_input" || !task.error) return undefined;
+  const pending = await client.listPermissions(task.id);
+  return pending.length === 0 ? task.error : undefined;
+}
+
 /** One printable line for an event of this task, or undefined for events not worth printing. */
 function describeEvent(event: DaemonEvent, taskId: string): string | undefined {
   const p = event.payload;
@@ -41,7 +80,7 @@ function describeEvent(event: DaemonEvent, taskId: string): string | undefined {
       return p.task.id === taskId ? `status: ${p.task.status}` : undefined;
     case "permission.requested":
       return p.request.taskId === taskId
-        ? `permission ${p.request.id}: ${p.request.tool}${p.request.title ? ` (${oneLine(p.request.title)})` : ""}`
+        ? `permission ${p.request.id}: ${describePermission(p.request)}`
         : undefined;
     case "permission.resolved":
       return p.taskId === taskId ? `permission ${p.requestId}: ${p.outcome}` : undefined;
@@ -187,7 +226,7 @@ export function buildProgram(
       if (task.error) log(`error:    ${task.error}`);
       if (pending.length > 0) {
         log("pending permissions:");
-        for (const p of pending) log(`  ${p.id}  ${p.tool}${p.title ? `  ${oneLine(p.title)}` : ""}`);
+        for (const p of pending) log(`  ${p.id}  ${describePermission(p, "  ")}`);
       }
       const lines = events.flatMap((e) => describeEvent(e, taskId) ?? []).slice(-20);
       if (lines.length > 0) {
@@ -213,19 +252,30 @@ export function buildProgram(
           exit(code);
           done();
         };
-        const check = (status: string) => {
-          const code = WATCH_END[status];
-          if (code === undefined) return;
-          if (status === "interrupted") {
+        const check = (task: Task) => {
+          const code = WATCH_END[task.status];
+          if (code === undefined) {
+            // Parked by a failed commit, nothing will move the task on by itself: report it.
+            parkedError(client, task).then(
+              (error) => {
+                if (error !== undefined) {
+                  finish(1, `needs input: ${error}\nsend a message to retry the commit, or discard`, true);
+                }
+              },
+              (err: unknown) => finish(1, err instanceof Error ? err.message : String(err), true),
+            );
+            return;
+          }
+          if (task.status === "interrupted") {
             finish(code, `interrupted; resume it with coord resume ${taskId.slice(0, 8)}`, true);
-          } else finish(code, `task ${status}`);
+          } else finish(code, `task ${task.status}`);
         };
         unsubscribe = client.subscribe({
           onEvent: (event) => {
             const line = describeEvent(event, taskId);
             if (line) log(line);
             if (event.payload.kind === "task.updated" && event.payload.task.id === taskId) {
-              check(event.payload.task.status);
+              check(event.payload.task);
             }
           },
           onStatus: (s) => {
@@ -236,7 +286,7 @@ export function buildProgram(
               (task) => {
                 if (finished) return;
                 log(`status: ${task.status}`);
-                check(task.status);
+                check(task);
               },
               (err: unknown) => finish(1, err instanceof Error ? err.message : String(err), true),
             );
@@ -248,9 +298,10 @@ export function buildProgram(
   program
     .command("allow")
     .description("allow a pending permission request")
-    .argument("<permissionId>")
+    .argument("<permissionId>", "permission id or unique prefix")
     .option("--always", "also allow it for the rest of the session")
-    .action(async (permissionId: string, opts: { always?: boolean }) => {
+    .action(async (input: string, opts: { always?: boolean }) => {
+      const permissionId = await resolvePermissionId(client, input);
       await client.answerPermission(permissionId, { allow: true, ...(opts.always && { remember: true }) });
       log(`allowed ${permissionId}${opts.always ? " (always)" : ""}`);
     });
@@ -258,9 +309,10 @@ export function buildProgram(
   program
     .command("deny")
     .description("deny a pending permission request")
-    .argument("<permissionId>")
+    .argument("<permissionId>", "permission id or unique prefix")
     .option("--reason <text>", "tell the agent why")
-    .action(async (permissionId: string, opts: { reason?: string }) => {
+    .action(async (input: string, opts: { reason?: string }) => {
+      const permissionId = await resolvePermissionId(client, input);
       await client.answerPermission(permissionId, {
         allow: false,
         ...(opts.reason !== undefined && { reason: opts.reason }),

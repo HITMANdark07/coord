@@ -31,11 +31,11 @@ const task = (id: string, status = "running", title = "A task") => ({
 const ID_A = "aaaa1111-0000-4000-8000-000000000001";
 const ID_B = "aaaa2222-0000-4000-8000-000000000002";
 const ID_C = "bbbb3333-0000-4000-8000-000000000003";
-const updated = (id: string, status: string, seq = 1) =>
+const updated = (id: string, status: string, seq = 1, over: Record<string, unknown> = {}) =>
   ({
     seq,
     at: "2026-10-26T00:00:00.000Z",
-    payload: { kind: "task.updated", task: task(id, status) },
+    payload: { kind: "task.updated", task: { ...task(id, status), ...over } },
     // The fixture is a partial Task: the client's schema fills the rest in, the fake transport doesn't.
   }) as unknown as Parameters<ReturnType<typeof fakeTransport>["emit"]>[0];
 
@@ -49,6 +49,33 @@ const daemon = (rest: (req: TransportRequest) => unknown = () => task(ID_A)) =>
     // Like a real socket: nothing is delivered before it opens.
     { gateEvents: true },
   );
+
+const PERM_A = "dddd1111-0000-4000-8000-00000000000a";
+const PERM_B = "dddd2222-0000-4000-8000-00000000000b";
+const PERM_C = "cccc3333-0000-4000-8000-00000000000c";
+const permission = (id: string, over: Record<string, unknown> = {}) => ({
+  id,
+  taskId: ID_A,
+  toolUseId: "u",
+  tool: "Bash",
+  input: { command: "ls" },
+  canRemember: true,
+  createdAt: "2026-10-26T00:00:00.000Z",
+  ...over,
+});
+/** A daemon with three pending permission requests; answers are accepted (204). */
+const permissionDaemon = () =>
+  fakeTransport((req) =>
+    req.method === "GET" && req.path.startsWith("/permissions")
+      ? [permission(PERM_A), permission(PERM_B), permission(PERM_C)]
+      : undefined,
+  );
+const requested = (request: ReturnType<typeof permission>, seq = 1) =>
+  ({
+    seq,
+    at: "2026-10-26T00:00:00.000Z",
+    payload: { kind: "permission.requested", request },
+  }) as unknown as Parameters<ReturnType<typeof fakeTransport>["emit"]>[0];
 
 /**
  * Runs `coord watch` against a gated transport. `beforeOpen` runs once the command has subscribed
@@ -180,20 +207,36 @@ describe("coord cli", () => {
   });
 
   it("allow --always sends remember; deny sends the reason", async () => {
-    const transport = fakeTransport(() => undefined);
+    const transport = permissionDaemon();
     const client = createClient(transport);
-    await run(client, "allow", "p1", "--always");
+    await run(client, "allow", PERM_A, "--always");
     expect(transport.requests.at(-1)).toMatchObject({
-      path: "/permissions/p1",
+      path: `/permissions/${PERM_A}`,
       body: { allow: true, remember: true },
     });
-    await run(client, "allow", "p2");
+    await run(client, "allow", PERM_B);
     expect((transport.requests.at(-1) as TransportRequest).body).toEqual({ allow: true });
-    await run(client, "deny", "p3", "--reason", "no thanks");
+    await run(client, "deny", PERM_C, "--reason", "no thanks");
     expect(transport.requests.at(-1)).toMatchObject({
-      path: "/permissions/p3",
+      path: `/permissions/${PERM_C}`,
       body: { allow: false, reason: "no thanks" },
     });
+  });
+
+  it("allow and deny resolve permission id prefixes like task ids", async () => {
+    const transport = permissionDaemon();
+    const client = createClient(transport);
+    await run(client, "allow", "cccc");
+    expect(transport.requests.at(-1)).toMatchObject({ method: "POST", path: `/permissions/${PERM_C}` });
+    await run(client, "deny", "dddd1");
+    expect(transport.requests.at(-1)).toMatchObject({ method: "POST", path: `/permissions/${PERM_A}` });
+    const answers = () => transport.requests.filter((r) => r.method === "POST").length;
+    await expect(run(client, "allow", "dddd")).rejects.toThrow(
+      new RegExp(`ambiguous[^]*${PERM_A}[^]*${PERM_B}`),
+    );
+    await expect(run(client, "deny", "ddd")).rejects.toThrow(/at least 4/);
+    await expect(run(client, "allow", "zzzz")).rejects.toThrow(/no pending permission matches/);
+    expect(answers()).toBe(2);
   });
 
   it("watch exits 0 on review and 1 on failed", async () => {
@@ -255,6 +298,72 @@ describe("coord cli", () => {
     expect(b.errors.join("\n")).toMatch(/coord resume/);
   });
 
+  it("watch prints what a permission prompt asks, and whether --always is offered", async () => {
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
+    const result = await watch(transport, ID_A, {
+      act: () => {
+        transport.emit(requested(permission(PERM_A, { input: { command: "rm -rf build\nls" } })));
+        transport.emit(
+          requested(
+            permission(PERM_B, {
+              tool: "Edit",
+              input: { file_path: "/w/src/a.ts", old_string: "x", new_string: "y" },
+              canRemember: false,
+            }),
+            2,
+          ),
+        );
+        transport.emit(
+          requested(permission(PERM_C, { tool: "mcp__x__y", input: { q: "a".repeat(300) } }), 3),
+        );
+        transport.emit(updated(ID_A, "review", 4));
+      },
+    });
+    const [bash, edit, other] = result.lines.filter((l) => l.startsWith("permission "));
+    expect(bash).toBe(`permission ${PERM_A}: Bash rm -rf build ls  [--always available]`);
+    expect(edit).toBe(`permission ${PERM_B}: Edit /w/src/a.ts`);
+    expect(other).toMatch(
+      new RegExp(`^permission ${PERM_C}: mcp__x__y \\{"q":"a+…  \\[--always available\\]$`),
+    );
+    const summary = other!.slice(`permission ${PERM_C}: mcp__x__y `.length, other!.indexOf("  ["));
+    expect(summary.length).toBeLessThanOrEqual(120);
+  });
+
+  it("watch exits 1 with the error, on stderr, for a task parked by a failed commit", async () => {
+    const parked = { ...task(ID_A, "needs_input"), error: "commit failed: no identity" };
+    const noPrompts = (current: () => unknown) =>
+      daemon((req) => {
+        if (req.path.startsWith("/permissions")) return [];
+        return req.path === `/tasks/${ID_A}` ? current() : undefined;
+      });
+    const snapshot = noPrompts(() => parked);
+    const a = await watch(snapshot, ID_A);
+    expect(a.code).toBe(1);
+    expect(a.errors.join("\n")).toMatch(/commit failed: no identity/);
+
+    const live = noPrompts(() => task(ID_A));
+    const b = await watch(live, ID_A, {
+      act: () => live.emit(updated(ID_A, "needs_input", 1, { error: parked.error })),
+    });
+    expect(b.code).toBe(1);
+    expect(b.errors.join("\n")).toMatch(/commit failed: no identity/);
+
+    // needs_input with an error but a prompt pending is an agent waiting, not a parked task.
+    const waiting = daemon((req) => {
+      if (req.path.startsWith("/permissions")) return [permission(PERM_A)];
+      return req.path === `/tasks/${ID_A}` ? parked : undefined;
+    });
+    const c = await watch(waiting, ID_A, {
+      // Once watch has looked at the prompts (and stayed), the task moves on.
+      act: () =>
+        void vi
+          .waitFor(() => expect(waiting.requests.some((r) => r.path.startsWith("/permissions"))).toBe(true))
+          .then(() => waiting.emit(updated(ID_A, "review", 2))),
+    });
+    expect(c.code).toBe(0);
+    expect(c.errors).toEqual([]);
+  });
+
   it("watch exits 1 with a message on stderr when the connection is lost or the task can't be read", async () => {
     const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
     const lost = await watch(transport, ID_A, { act: () => transport.setStatus("closed") });
@@ -293,7 +402,7 @@ describe("coord cli", () => {
             taskId: ID_A,
             toolUseId: "u",
             tool: "Bash",
-            input: {},
+            input: { command: "git push --force" },
             canRemember: true,
             createdAt: "x",
           },
@@ -316,7 +425,7 @@ describe("coord cli", () => {
     expect(out).toContain("5 in / 7 out");
     expect(out).toContain("$0.5000");
     expect(out).toContain("error:    boom");
-    expect(out).toContain("perm-1");
+    expect(out).toContain("perm-1  Bash  git push --force  [--always available]");
     expect(out).toContain("step 25");
     expect(out).toContain("step 6");
     expect(out).not.toContain("step 5\n");
