@@ -360,6 +360,31 @@ describe("coord cli", () => {
     expect(summary).toMatch(/^\/Users\/me\/.+….+\/deep\/the-file\.ts$/);
   });
 
+  it("permission summaries strip invisible format characters", async () => {
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
+    const result = await watch(transport, ID_A, {
+      act: () => {
+        // Zero-width and direction marks can hide or reorder part of a command.
+        const command = "rm​ -rf‎ ~﻿ ls ";
+        transport.emit(requested(permission(PERM_A, { input: { command } })));
+        transport.emit(updated(ID_A, "review", 2));
+      },
+    });
+    const bash = result.lines.find((l) => l.startsWith("permission "));
+    expect(bash).toBe(`permission ${PERM_A}: Bash rm -rf ~ ls  [--always available]`);
+  });
+
+  it("msg says the message waits for the turn end while the agent is working", async () => {
+    const after = (status: string) =>
+      createClient(
+        fakeTransport((req) => (req.path.startsWith("/tasks?") ? [task(ID_A)] : task(ID_A, status))),
+      );
+    expect(await run(after("running"), "msg", ID_A, "more")).toEqual([
+      `queued for ${ID_A.slice(0, 8)}: delivered when the current turn ends`,
+    ]);
+    expect(await run(after("queued"), "msg", ID_A, "more")).toEqual([`sent to ${ID_A.slice(0, 8)} (queued)`]);
+  });
+
   it("watch exits 1 with the error, on stderr, for a task parked by a failed commit", async () => {
     const parked = { ...task(ID_A, "needs_input"), error: "commit failed: no identity" };
     const noPrompts = (current: () => unknown) =>

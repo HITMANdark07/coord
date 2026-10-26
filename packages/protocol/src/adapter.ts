@@ -62,7 +62,11 @@ export interface AgentAdapter {
     resume: boolean;
     permissionCallback: boolean;
     costReporting: boolean;
-    /** send() and interrupt() work while a turn is running. */
+    /**
+     * send() and interrupt() work while a turn is running. The runner itself only sends between
+     * turns (the Claude Agent SDK folds a mid-turn message into the current turn); this flags what
+     * the agent supports, for a later mid-turn steering feature.
+     */
     liveMessages: boolean;
   };
   start(task: TaskSpec, ctx: RunContext): AgentRun;

@@ -31,11 +31,12 @@ const WATCH_END: Record<string, number> = {
 };
 
 /**
- * C0 and C1 control characters (other than tab and newline, which callers render) and bidi
- * overrides. Agent text and tool input reach the terminal through here: an ESC sequence could
- * erase or recolor part of a command the user is about to allow, a bidi override reorder it.
+ * C0 and C1 control characters (other than tab and newline, which callers render) and format
+ * characters (bidi overrides, zero-width and direction marks). Agent text and tool input reach the
+ * terminal through here: an ESC sequence could erase or recolor part of a command the user is
+ * about to allow, a bidi override reorder it, a zero-width character hide a difference.
  */
-const CONTROL = /(?![\t\n])[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu;
+const CONTROL = /(?![\t\n])[\p{Cc}\p{Cf}]/gu;
 const stripControl = (text: string) => text.replace(CONTROL, "");
 
 /**
@@ -362,7 +363,12 @@ export function buildProgram(
     .argument("<text>", "the message (use `--` first if it starts with -)")
     .action(async (input: string, text: string) => {
       const task = await client.sendMessage(await id(input), text);
-      log(`sent to ${task.id.slice(0, 8)} (${task.status})`);
+      // A busy agent gets the message as its next turn, not mid-turn (the SDK would fold it in).
+      log(
+        task.status === "running" || task.status === "needs_input"
+          ? `queued for ${task.id.slice(0, 8)}: delivered when the current turn ends`
+          : `sent to ${task.id.slice(0, 8)} (${task.status})`,
+      );
     });
 
   const actions = [
