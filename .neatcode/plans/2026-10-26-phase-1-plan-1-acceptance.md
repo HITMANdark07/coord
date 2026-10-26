@@ -150,3 +150,73 @@ For task A: after turn 1, `coord show` gave `96839 in / 1908 out tokens · $0.23
 | E    | permission prompt shows command/path/--always               | PASS   |
 
 Cleanup: the daemon was stopped with SIGINT to pid 11583 and exited within 1 s. Task `8e604488` (review) left its worktree under the temp `COORD_HOME`.
+
+# Run 3 — turn-boundary messages (post-residual-fix)
+
+Date: 2026-10-26. Branch `phase-1/core-loop`, HEAD `6da6319`. Real Claude Code; no source file was modified.
+
+## Environment
+
+- Isolated state: `COORD_HOME=<scratchpad>/acceptance3/home`, `COORD_PORT=4648`, exported for every command. `~/.coord` and port 4545 were not used.
+- Scratch repo `acceptance3/scratch` cloned from the local bare `acceptance3/remote.git`; `init` (12bdddc) on `main`.
+- Daemon started in the background with `pnpm daemon`, output in `acceptance3/daemon.log`; pid 18597 came from `daemon.lock`. The token was never printed.
+- All tasks used `--permission accept_edits`; Bash prompts were answered with `coord allow`. Nothing was bypassed.
+- Note: `pnpm coord new` ran from a wrapper script resolves the repo from `INIT_CWD`, which `pnpm --filter` overwrote, so the tasks were created with `--repo <scratch>`.
+
+## A1. Single live message — PASS
+
+Task `6a7295bc`: create a.ts, b.ts, c.ts plus test.ts and run the test. While `running`:
+
+```
+coord msg 6a72 "Also add a d.ts exporting a function d that returns its name, and add it to test.ts."
+sent to 6a7295bc (running)
+```
+
+- Turn 1 ended with a `done` event (the summary mentions only a, b, c) and the task stayed `running`; the queued message started turn 2 (a second Bash permission, answered with `coord allow 2c10`). `done` for turn 2 said "I added `d.ts` ... all 4 passed", then `status: review`. No stuck state; the whole run took about 50 s.
+- Commits on the task branch: `746e3fe ... (turn 1)` (a.ts, b.ts, c.ts, test.ts) and `beb8a7f ... (turn 2)` (d.ts, test.ts +5 lines).
+- Session: the task row keeps one `session_id` (`6b65b77f-...`) and turn 2 knew turn 1's files, so it resumed the same session. The id is not shown by `coord show`; it was read from `coord.db`.
+
+## A2. Two live messages in one turn — PASS
+
+Task `606deebd` (create e1.ts..e3.ts). While `running`: `coord msg` for f.ts, then `coord msg` for g.ts (both `sent ... (running)`).
+
+- Events: `done` (turn 1), `status: running`, one `done` that mentions both `f.ts` and `g.ts`, `status: review`. Usage `2 turns`.
+- Commits: `c512ea9 ... (turn 1)` (e1..e3) and ONE `770ef44 ... (turn 2)` (f.ts and g.ts).
+
+## A3. Message then interrupt — PASS
+
+Task `3cef906d` (create h1.ts..h5.ts). While `running`: `coord msg 3cef "Also add z.ts ..."` then `coord interrupt 3cef` (rc=0). Within 3 s:
+
+```
+status:   review
+usage:    1208 in / 20 out tokens · $0.0001 · 1 turns
+error:    Not sent: "Also add z.ts exporting a function z that returns its name."
+  done: Interrupted by user
+  status: review
+```
+
+Still `review`, 1 turn, after another 20 s (no turn 2). The interrupt landed before any file was written, so there was nothing to commit (branch at `init`).
+
+## A4. Cost — PASS
+
+Task `6a7295bc`: after turn 1 (caught in `running` between turns) `231629 in / 1520 out tokens · $0.2491 · 1 turns`; at `review` `339244 in / 2742 out tokens · $0.3113 · 2 turns`. Cumulative. Task `606deebd` at review: `194479 in / 1503 out · $0.2367 · 2 turns`.
+
+## A5. Permission display — PASS
+
+`coord show` with the pending prompt: `67e6c31d-...  Bash  node --test test.ts  [--always available]` followed by the JSON input (command and description). `coord allow 67e6` echoed `allowed 67e6c31d-...: Bash node --test test.ts`. Only Bash prompts appeared (Write is auto-accepted under `accept_edits`), so the Write path/file-name display (D3 of run 2) was not re-checked.
+
+## Defects
+
+None new. Minor observation: between turns the task shows `status: running` with 1 turn and a `done` event already emitted; that is the intended hand-off but a client cannot tell it from a finished turn except by the later events.
+
+## Summary
+
+| Item | Description                                         | Result |
+| ---- | --------------------------------------------------- | ------ |
+| A1   | one live msg: turn 1 + turn 2 commits, then review  | PASS   |
+| A2   | two live msgs: one turn 2 (one commit), then review | PASS   |
+| A3   | msg then interrupt: review, `Not sent`, no turn 2   | PASS   |
+| A4   | cost cumulative                                     | PASS   |
+| A5   | permission display and allow echo (Bash)            | PASS   |
+
+Cleanup: the daemon was stopped with SIGINT to pid 18597 and exited within 3 s.
