@@ -16,7 +16,7 @@ export type FakeStep =
   | { event: AgentEvent }
   | { permission: PermissionRequest }
   | { edit: { file: string; content: string } }
-  | { waitForMessage: true };
+  | { hold: true };
 
 export type FakeAdapter = AgentAdapter & {
   calls: {
@@ -25,6 +25,8 @@ export type FakeAdapter = AgentAdapter & {
     /** Messages delivered with `send()` while a run was live. */
     send: string[];
   };
+  /** Lets every turn now held at a `hold` step go on. */
+  release(): void;
   /** Resolves once every agent process this fake started has finished. */
   settled(): Promise<void>;
 };
@@ -44,7 +46,10 @@ function toTurns(script: FakeStep[]): FakeStep[][] {
 
 export interface FakeAdapterOptions {
   id?: AgentId;
-  /** The turn a message delivered with `send()` plays. Default: `text "received: <msg>"`, then `done`. */
+  /**
+   * The turn a message sent while the agent is idle (between turns) plays. Default:
+   * `text "received: <msg>"`, then `done`.
+   */
   messageTurn?: (message: string) => FakeStep[];
   /** `send()` refuses every message (returns false), as a session whose input has closed does. */
   refuseSends?: boolean;
@@ -62,16 +67,17 @@ export interface FakeAdapterOptions {
  * - It runs on its own. While the runner reads `events` it waits for each event to be read
  *   before going on, which keeps tests deterministic. Once the runner stops reading, it goes on
  *   anyway, as a real agent process does.
- * - Every message accepted by `send()` is its own turn (see `messageTurn`), played after the
- *   current turn ends. Messages accepted before `end()` still play after it, since the real
- *   agent has already read them (adapter-claude-code's message queue). Only an abort stops them.
+ * - `send()` behaves as the Claude Agent SDK's streaming input does (acceptance run 2): a
+ *   message sent mid-turn is folded into that turn (echoed as `text "received: <msg>"` before
+ *   its next step) and gets no `done` of its own; a message sent while the agent is idle, after
+ *   a `done` and before `end()`, starts a new turn (see `messageTurn`) that ends in `done`.
  *
  * - `edit` writes into `ctx.cwd`; `permission` awaits `ctx.requestPermission` and then emits a
- *   `tool_result` with the decision; `waitForMessage` holds the turn until a message has
- *   arrived (the message still plays as its own turn afterwards).
+ *   `tool_result` with the decision; `hold` holds the turn until `release()` (or an interrupt,
+ *   `end()` or abort), so a test can act while the turn is in progress.
  * - `interrupt()` ends the current turn with `done` ("interrupted"), like the real adapter; an
  *   aborted `ctx.signal` ends the run with `error`; `end()` stops the turn in progress (if any)
- *   and ends the run once the queued messages have played.
+ *   and ends the run once the messages already sent while idle have played.
  */
 export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): FakeAdapter {
   const turns = toTurns(script);
@@ -79,6 +85,9 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
   const nextTurn = new Map<string, number>();
   const calls: FakeAdapter["calls"] = { start: [], resume: [], send: [] };
   const processes: Promise<void>[] = [];
+  // Bumped by release(); each live run's wake-up, so a held step re-checks.
+  let releases = 0;
+  const wakers = new Set<() => void>();
   const messageTurn =
     opts.messageTurn ??
     ((message: string): FakeStep[] => [
@@ -88,8 +97,9 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
 
   function play(turnIndex: number, ctx: RunContext): AgentRun {
     const firstTurn = turns[turnIndex] ?? [{ event: { type: "done" } }];
-    // Messages accepted by send() whose turn hasn't started yet.
+    // Messages sent while idle, each the next turn; and messages sent mid-turn, not echoed yet.
     const inbox: string[] = [];
+    const folded: string[] = [];
     // Events emitted but not read yet, and how far the reader has asked.
     const out: AgentEvent[] = [];
     let emitted = 0;
@@ -119,6 +129,7 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
         check();
       });
     ctx.signal.addEventListener("abort", changed);
+    wakers.add(changed);
     const settled = () => cut || interrupted || ctx.signal.aborted;
 
     /** Hands an event to the reader and waits until it asks for the next one (or stopped reading). */
@@ -129,6 +140,13 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
       await until(() => requested > index + 1 || detached || ctx.signal.aborted);
     }
 
+    /** The agent reads messages sent mid-turn as part of the turn in progress. */
+    async function echoFolded(): Promise<void> {
+      for (let m = folded.shift(); m !== undefined; m = folded.shift()) {
+        await emit({ type: "text", text: `received: ${m}` });
+      }
+    }
+
     /** Plays one turn. Returns true when it ended with `done` and the session goes on. */
     async function runTurn(steps: FakeStep[]): Promise<boolean> {
       stop = new AbortController();
@@ -137,6 +155,8 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
       inTurn = true;
       try {
         for (const step of steps) {
+          if (settled()) break;
+          await echoFolded();
           if (settled()) break;
           if ("event" in step) {
             if (step.event.type === "session") nextTurn.set(step.event.sessionId, turnIndex + 1);
@@ -156,10 +176,12 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
             if (!settled())
               await emit({ type: "tool_result", toolUseId: step.permission.toolUseId, ok: decision.allow });
           } else {
-            await until(() => inbox.length > 0 || settled() || ended);
+            const at = releases;
+            await until(() => releases > at || settled());
           }
         }
         // Reached when the turn was cut short, or the script ran out without ending the turn.
+        if (!ctx.signal.aborted) await echoFolded();
         inTurn = false;
         if (ctx.signal.aborted) {
           await emit({ type: "error", message: "aborted" });
@@ -191,6 +213,7 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
       } finally {
         finished = true;
         ctx.signal.removeEventListener("abort", changed);
+        wakers.delete(changed);
         changed();
       }
     })();
@@ -217,7 +240,7 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
       send(message) {
         if (ended || opts.refuseSends) return false;
         calls.send.push(message);
-        inbox.push(message);
+        (inTurn ? folded : inbox).push(message);
         changed();
         return true;
       },
@@ -242,6 +265,10 @@ export function fakeAdapter(script: FakeStep[], opts: FakeAdapterOptions = {}): 
     id: opts.id ?? "claude-code",
     capabilities: { resume: true, permissionCallback: true, costReporting: true, liveMessages: true },
     calls,
+    release() {
+      releases++;
+      for (const wake of [...wakers]) wake();
+    },
     settled: async () => {
       await Promise.all(processes);
     },

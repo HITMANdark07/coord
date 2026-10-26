@@ -89,6 +89,8 @@ const NEXT: Partial<Record<TaskStatus, readonly TaskStatus[]>> = {
 const RESTING_STATUSES: TaskStatus[] = ["review", "failed", "interrupted", "needs_input"];
 const CANCELLABLE_STATUSES: TaskStatus[] = ["queued", ...ACTIVE_STATUSES, ...RESTING_STATUSES];
 const RESUME_TEXT = "Continue where you left off.";
+/** Between messages delivered together as one turn. */
+const MESSAGE_SEPARATOR = "\n\n";
 /** Spec §6: a discarded task's local branch is kept this long. */
 const DISCARDED_BRANCH_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -103,16 +105,14 @@ const BRANCH_PREFIX = "agent/";
 interface Live {
   abort: AbortController;
   run?: AgentRun;
-  /** The turn's events are over and endTurn is committing: a message now waits for the turn end. */
+  /** endTurn has ended the run: a message now waits for start() to finish and becomes a follow-up. */
   ending?: boolean;
   /**
-   * Turns the run still owes: the current one plus one per message `send()` accepted, since the
-   * agent runs each accepted message as its own turn. The task reaches review only at zero.
+   * Messages from the user during the turn, oldest first, sent together when the turn ends (see
+   * `message()`). Mirrored, joined, in the task's `pendingMessage`.
    */
-  outstanding: number;
-  /** Texts of accepted messages whose turn hasn't started yet, oldest first. */
   queued: string[];
-  /** Accepted messages that never ran as a turn here; set when the run's last turn ends. */
+  /** Messages that never reached the agent: dropped by an interrupt or cancel, or by an error. */
   dropped: string[];
   /** Resolves once start() is done with the task: the turn ended (or setup stopped) and live is gone. */
   finished: Promise<void>;
@@ -296,29 +296,25 @@ export class TaskRunner {
   }
 
   /**
-   * A message from the user. A working agent gets it live; a task at rest resumes its session
-   * with it, through the queue so the concurrency cap applies (spec §5).
+   * A message from the user. A working agent gets it when its turn ends, as the next turn of the
+   * same session; a task at rest resumes its session with it, through the queue so the
+   * concurrency cap applies (spec §5).
    */
   async message(taskId: string, text: string): Promise<TaskRecord> {
     if (text.trim().length === 0) throw new RunnerError("invalid_request", "message text is empty");
     const task = this.getOpen(taskId);
     const live = this.live.get(taskId);
     if ((task.status === "running" || task.status === "needs_input") && live?.run) {
-      const adapter = this.deps.adapters[task.agent as AgentId];
-      if (!adapter?.capabilities.liveMessages) {
-        throw new RunnerError(
-          "conflict",
-          `${task.agent} can't take messages during a turn; interrupt the task first, then send the message`,
-        );
-      }
-      // The turn is ending: the session no longer reads messages, so this one becomes a follow-up.
-      if (live.ending || !live.run.send(text)) {
+      // The run is over: the message resumes the session once start() is done with it.
+      if (live.ending) {
         await live.finished;
         return this.message(taskId, text);
       }
-      live.outstanding++;
+      // Not sent now: the SDK folds a message sent mid-turn into the turn in progress, with no
+      // turn end of its own (acceptance run 2), so it would get no commit and the run would never
+      // be seen to finish. Stored too, so a daemon restart makes it a follow-up instead of losing it.
       live.queued.push(text);
-      return task;
+      return this.deps.store.updateTask(taskId, { pendingMessage: live.queued.join(MESSAGE_SEPARATOR) });
     }
     if (this.isResting(task)) return this.followUp(task, text);
     throw new RunnerError("conflict", `task is ${task.status}; it can't take a message now`);
@@ -332,10 +328,8 @@ export class TaskRunner {
     if (!live || !run || (task.status !== "running" && task.status !== "needs_input")) {
       throw new RunnerError("conflict", `task is ${task.status}; there is no turn to interrupt`);
     }
-    // The user asked to stop, so the turn in progress is the last one. The agent has already read
-    // any message queued with send() and would run it as one more turn even after run.end(), so
-    // that turn's end kills the run instead and shows those messages as not sent (endTurn).
-    live.outstanding = 1;
+    // The user asked to stop: messages waiting for this turn's end are not sent; endTurn shows them.
+    this.dropQueued(taskId, live);
     const stopping = run.interrupt();
     // An agent waiting on a prompt gets no answer now; clients drop the prompt.
     this.deps.broker.withdrawAll(taskId);
@@ -501,7 +495,6 @@ export class TaskRunner {
     const live: Live = {
       abort: new AbortController(),
       finished: new Promise((r) => (finish = r)),
-      outstanding: 1,
       queued: [],
       dropped: [],
     };
@@ -630,7 +623,7 @@ export class TaskRunner {
     await this.drive(task.id, live, live.run);
   }
 
-  /** Consumes one turn's events. `events` never throws (AGENTS.md rule 7). */
+  /** Consumes the run's events, turn by turn. `events` never throws (AGENTS.md rule 7). */
   private async drive(taskId: string, live: Live, run: AgentRun): Promise<void> {
     const { store } = this.deps;
     for await (const event of run.events) {
@@ -652,17 +645,10 @@ export class TaskRunner {
           });
           break;
         case "done":
-          // A message sent during the turn runs as the next turn of the same run (see
-          // `outstanding`); each turn gets its own commit as it ends (spec §6).
-          if (--live.outstanding > 0) {
-            // The next turn is the oldest queued message's.
-            live.queued.shift();
-            await this.commitMidRun(taskId);
-            break;
-          }
           // Awaited inside the loop: leaving it closes `events`, which must wait until endTurn
-          // has committed and, if needed, killed the run.
-          await this.endTurn(taskId, live, run);
+          // has committed and, if needed, killed the run. The run goes on when endTurn sent the
+          // messages that came during the turn.
+          if (await this.endTurn(taskId, live, run)) break;
           return;
         case "error":
           await this.endTurn(taskId, live, run, event.message);
@@ -673,44 +659,68 @@ export class TaskRunner {
   }
 
   /**
-   * A turn is over: commit whatever the agent left (also after an error, to keep the work),
-   * end the agent session, then review, failed, or needs_input when the commit failed. A failed
-   * commit leaves the worktree exactly as it is (spec §6).
+   * A turn is over: commit whatever the agent left (also after an error, to keep the work).
+   * Messages that came during the turn then go to the now idle agent as its next turn, and this
+   * returns true. Otherwise the agent session ends: review, failed, or needs_input when the
+   * commit failed. A failed commit leaves the worktree exactly as it is (spec §6).
    */
-  private async endTurn(taskId: string, live: Live, run: AgentRun, failure?: string): Promise<void> {
-    live.ending = true;
+  private async endTurn(taskId: string, live: Live, run: AgentRun, failure?: string): Promise<boolean> {
     if (this.shuttingDown) {
       // The daemon is stopping: no commit and no status change, shutdown() interrupts the task.
+      // Queued messages stay in pendingMessage for the resume.
+      live.ending = true;
       live.abort.abort();
       run.end();
       if (this.live.get(taskId) === live) this.live.delete(taskId);
-      return;
+      return false;
     }
-    // Messages still queued now will never run here: an interrupt or cancel made this turn the
-    // last, or an error ended the run early.
-    live.dropped.push(...live.queued.splice(0));
+    // After an error there is no session to send to; a message from now on is a follow-up.
+    if (failure !== undefined) live.ending = true;
     const task = this.deps.store.getTask(taskId);
-    if (!task) return;
+    if (!task) return false;
     const turns = task.turns + 1;
-    // run.end() only closes the agent's input: messages it has already read still run as turns,
-    // in a worktree that is now in review or being discarded. So when messages were dropped, or a
-    // cancel is closing the task, kill the run. Do it before the commit: this turn's `done` is in,
-    // so nothing of it is in flight, and a queued turn can't start editing during the commit.
-    // The commit still takes everything on disk. Otherwise the agent finishes gracefully.
-    const killIfDropped = () => {
-      if (live.dropped.length > 0 || this.closing.has(taskId)) live.abort.abort();
+    // A cancel kills the run before the commit, so the agent can't edit a worktree being
+    // discarded. This turn's `done` is in, so nothing of it is in flight; the commit still takes
+    // everything on disk. Otherwise the agent finishes gracefully.
+    const killIfClosing = () => {
+      if (this.closing.has(taskId)) live.abort.abort();
     };
-    killIfDropped();
+    killIfClosing();
     let commitError: string | undefined;
     try {
       await this.commitWork(task, turns);
     } catch (e) {
       commitError = gitMessage(e);
-    } finally {
-      // A cancel may have started during the commit.
-      killIfDropped();
-      run.end();
     }
+
+    // Checked after the commit, so a message sent during it is still this run's next turn.
+    let followUp: string | null = null;
+    if (failure === undefined && !this.closing.has(taskId) && live.queued.length > 0) {
+      const text = live.queued.splice(0).join(MESSAGE_SEPARATOR);
+      if (run.send(text)) {
+        // A failed commit doesn't stop the agent: the error shows, and the next turn end commits
+        // the same work or parks the task.
+        const error =
+          commitError === undefined
+            ? null
+            : `commit failed (turn ${turns}): ${commitError}. The next turn end tries again.`;
+        // The status stays: the agent is on its next turn.
+        this.transition(taskId, this.get(taskId).status as TaskStatus, {
+          turns,
+          error,
+          pendingMessage: null,
+        });
+        return true;
+      }
+      // The session's input has closed: the messages resume it as a follow-up instead.
+      followUp = text;
+    }
+    live.ending = true;
+    // An error ended the run with messages still queued: they never reached the agent.
+    live.dropped.push(...live.queued.splice(0));
+    // A cancel may have started during the commit.
+    killIfClosing();
+    run.end();
     if (this.live.get(taskId) === live) this.live.delete(taskId);
     // Nothing is waiting on a prompt any more; clients drop it.
     this.deps.broker.withdrawAll(taskId);
@@ -718,38 +728,24 @@ export class TaskRunner {
     if (this.closing.has(taskId)) {
       // This turn ended because of a cancel, which sets the status (and reports dropped
       // messages) once it has discarded.
-      this.deps.store.updateTask(taskId, { turns });
-      return;
+      this.deps.store.updateTask(taskId, { turns, pendingMessage: null });
+      return false;
     }
     const unsent = notSent(live.dropped);
+    const patch = { turns, pendingMessage: null };
     if (commitError !== undefined) {
       const after = failure ? ` (after agent error: ${failure})` : "";
       this.transition(taskId, "needs_input", {
-        turns,
+        ...patch,
         error: joinNotes(`commit failed: ${commitError}${after}`, unsent),
       });
     } else if (failure !== undefined) {
-      this.transition(taskId, "failed", { turns, error: joinNotes(failure, unsent) });
+      this.transition(taskId, "failed", { ...patch, error: joinNotes(failure, unsent) });
     } else {
-      this.transition(taskId, "review", { turns, error: joinNotes(unsent) });
+      this.transition(taskId, "review", { ...patch, error: joinNotes(unsent) });
     }
-  }
-
-  /**
-   * A turn ended but the run goes on with a sent message. The commit failing doesn't stop the
-   * agent: the error shows, and the next turn end commits the same work or parks the task.
-   */
-  private async commitMidRun(taskId: string): Promise<void> {
-    const task = this.get(taskId);
-    const turns = task.turns + 1;
-    let error: string | null = null;
-    try {
-      await this.commitWork(task, turns);
-    } catch (e) {
-      error = `commit failed (turn ${turns}): ${gitMessage(e)}. The next turn end tries again.`;
-    }
-    // The status stays: the agent is already on its next turn (running, or needs_input on a prompt).
-    this.transition(taskId, this.get(taskId).status as TaskStatus, { turns, error });
+    if (followUp !== null) this.followUp(this.get(taskId), followUp);
+    return false;
   }
 
   /** The per-turn checkpoint commit (spec §6): one place for its message, trailers and identity. */
@@ -777,9 +773,14 @@ export class TaskRunner {
     }
   }
 
-  /** Stores the follow-up and queues the task; start() resumes the session with it. */
+  /**
+   * Stores the follow-up and queues the task; start() resumes the session with it. A message
+   * still stored from before a daemon restart (queued for a turn end) goes first, not lost.
+   */
   private followUp(task: TaskRecord, text: string): TaskRecord {
-    this.transition(task.id, "queued", { pendingMessage: text });
+    const pendingMessage =
+      task.pendingMessage === null ? text : task.pendingMessage + MESSAGE_SEPARATOR + text;
+    this.transition(task.id, "queued", { pendingMessage });
     this.schedule();
     return this.get(task.id);
   }
@@ -798,16 +799,16 @@ export class TaskRunner {
   }
 
   /**
-   * Stops the task's agent or setup and waits until start() is done with it. Returns the sent
-   * messages that never ran.
+   * Stops the task's agent or setup and waits until start() is done with it. Returns the
+   * messages that never reached the agent.
    */
   private async stop(taskId: string): Promise<string[]> {
     const live = this.live.get(taskId);
     if (!live) return [];
     if (live.run) {
       const run = live.run;
-      // As for interrupt(): this turn is the last, and endTurn drops what is queued behind it.
-      live.outstanding = 1;
+      // As for interrupt(): this turn is the last, and nothing queued for its end is sent.
+      this.dropQueued(taskId, live);
       this.deps.broker.withdrawAll(taskId);
       // The interrupt ends the turn the normal way, so endTurn commits what the agent left.
       const stopped = (async () => {
@@ -884,6 +885,13 @@ export class TaskRunner {
   }
 
   // Helpers
+
+  /** The messages waiting for the turn end won't be sent: shown later as not sent, not resumed. */
+  private dropQueued(taskId: string, live: Live): void {
+    if (live.queued.length === 0) return;
+    live.dropped.push(...live.queued.splice(0));
+    this.deps.store.updateTask(taskId, { pendingMessage: null });
+  }
 
   private get(taskId: string): TaskRecord {
     const task = this.deps.store.getTask(taskId);

@@ -21,7 +21,8 @@ afterEach(async () => {
 const DAY = 24 * 60 * 60 * 1000;
 const done: FakeStep = { event: { type: "done" } };
 const session: FakeStep = { event: { type: "session", sessionId: "s-1" } };
-const waitForMessage: FakeStep = { waitForMessage: true };
+/** Holds the turn until `adapter.release()`: the task stays mid-turn while the test acts. */
+const hold: FakeStep = { hold: true };
 /** A message turn that talks first, then edits: it shows whether a dropped message still ran. */
 const orphanTurn = (m: string): FakeStep[] => [
   { event: { type: "text", text: `received: ${m}` } },
@@ -117,7 +118,7 @@ async function setup(script: FakeStep[], opts: BootOptions & { gitEnv?: Record<s
 
 describe("TaskRunner lifecycle", () => {
   it("shutdown waits for an in-flight cancel and does not overwrite its result", async () => {
-    const { store, runner, create } = await setup([session, edit("a.txt"), waitForMessage, done]);
+    const { store, runner, create } = await setup([session, edit("a.txt"), hold, done]);
     const task = await create();
     await vi.waitFor(() =>
       expect(existsSync(join(store.getTask(task.id)!.worktreePath ?? "/nope", "a.txt"))).toBe(true),
@@ -131,10 +132,9 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("shutdown interrupts live runs, keeps their edits uncommitted and starts nothing queued", async () => {
-    const { store, runner, adapter, create, commits } = await setup(
-      [session, edit("a.txt"), waitForMessage, done],
-      { maxConcurrent: 1 },
-    );
+    const { store, runner, adapter, create, commits } = await setup([session, edit("a.txt"), hold, done], {
+      maxConcurrent: 1,
+    });
     const first = await create();
     const second = await create({ prompt: "Second task" });
     await vi.waitFor(() =>
@@ -152,28 +152,9 @@ describe("TaskRunner lifecycle", () => {
     expect(adapter.calls.start).toHaveLength(1);
   });
 
-  it("message during a running turn is sent live", async () => {
-    const { store, runner, adapter, create, events } = await setup([session, waitForMessage, done]);
-    const task = await create();
-    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
-
-    const returned = await runner.message(task.id, "use tabs");
-    expect(returned.id).toBe(task.id);
-    await runner.idle();
-
-    expect(adapter.calls.send).toEqual(["use tabs"]);
-    expect(adapter.calls.resume).toEqual([]);
-    expect(events.map((e) => e.payload)).toContainEqual({
-      kind: "agent.event",
-      taskId: task.id,
-      event: { type: "text", text: "received: use tabs" },
-    });
-    expect(store.getTask(task.id)!.status).toBe("review");
-  });
-
-  it("a live message runs as its own turn and is committed", async () => {
-    const { store, runner, create, events, commits } = await setup(
-      [session, edit("a.txt"), waitForMessage, done],
+  it("a message during a running turn waits for the turn end and runs as the next turn", async () => {
+    const { store, runner, adapter, create, events, commits } = await setup(
+      [session, edit("a.txt"), hold, done],
       {
         fake: {
           messageTurn: (m) => [edit("b.txt"), { event: { type: "text", text: `received: ${m}` } }, done],
@@ -181,68 +162,105 @@ describe("TaskRunner lifecycle", () => {
       },
     );
     const task = await create();
-    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
+    const wt = () => store.getTask(task.id)!.worktreePath ?? "/nope";
+    await vi.waitFor(() => expect(existsSync(join(wt(), "a.txt"))).toBe(true));
 
-    await runner.message(task.id, "add b");
+    const returned = await runner.message(task.id, "add b");
+    expect(returned).toMatchObject({ id: task.id, status: "running" });
+    // Sent mid-turn, the SDK folds it into this turn with no turn end of its own (acceptance
+    // run 2), so it waits for this turn's end.
+    expect(adapter.calls.send).toEqual([]);
+    adapter.release();
+    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("review"));
     await runner.idle();
 
     const t = store.getTask(task.id)!;
-    expect(t.status).toBe("review");
-    expect(t.turns).toBe(2);
+    expect(t).toMatchObject({ turns: 2, pendingMessage: null, error: null });
+    expect(adapter.calls.send).toEqual(["add b"]);
+    expect(adapter.calls.resume).toEqual([]);
     expect(commits(t.branch!)).toEqual(["Fix it (turn 1)", "Fix it (turn 2)"]);
+    expect(git(t.worktreePath!, "show", "HEAD~1:a.txt")).toBe("a.txt from the agent\n");
     expect(git(t.worktreePath!, "show", "HEAD:b.txt")).toBe("b.txt from the agent\n");
     // Between the two turn ends the task is still running (turn 1 recorded); review only after.
     const log = events.flatMap((e) => {
       const p = e.payload;
-      if (p.kind === "agent.event" && p.taskId === task.id && p.event.type === "done") return ["done"];
+      if (p.kind === "agent.event" && p.taskId === task.id) {
+        if (p.event.type === "done") return ["done"];
+        if (p.event.type === "text") return [p.event.text];
+      }
       if (p.kind === "task.updated" && p.task.id === task.id) return [`${p.task.status}:${p.task.turns}`];
       return [];
     });
     const between = log.slice(log.indexOf("done") + 1, log.lastIndexOf("done"));
-    expect(between).toEqual(["running:1"]);
+    expect(between).toEqual(["running:1", "received: add b"]);
     expect(log.slice(log.lastIndexOf("done") + 1)).toEqual(["review:2"]);
   });
 
-  it("interrupt with a queued live message ends at the current turn", async () => {
-    const { store, broker, runner, adapter, create, events, commits } = await setup(
-      [edit("a.txt"), waitForMessage, { permission }, done],
-      { fake: { messageTurn: orphanTurn } },
-    );
+  it("messages sent during one turn are delivered together as the next turn", async () => {
+    const { store, runner, adapter, create, commits } = await setup([session, edit("a.txt"), hold, done]);
     const task = await create();
     await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
-    await runner.message(task.id, "more");
-    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
 
-    await runner.interrupt(task.id);
+    await runner.message(task.id, "first");
+    await runner.message(task.id, "second");
+    // Kept by the daemon too, so a restart before the turn end doesn't lose them.
+    expect(store.getTask(task.id)!.pendingMessage).toBe("first\n\nsecond");
+    adapter.release();
     await runner.idle();
 
     const t = store.getTask(task.id)!;
-    expect(t.status).toBe("review");
-    expect(t.turns).toBe(1);
-    expect(adapter.calls.send).toEqual(["more"]);
+    expect(t).toMatchObject({ status: "review", turns: 2, pendingMessage: null });
+    expect(adapter.calls.send).toEqual(["first\n\nsecond"]);
+    expect(commits(t.branch!)).toEqual(["Fix it (turn 1)"]);
+  });
+
+  it("a message while the agent waits on a permission runs after that turn", async () => {
+    const { store, broker, runner, adapter, create } = await setup([session, { permission }, done]);
+    const task = await create();
+    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
+
+    expect((await runner.message(task.id, "use tabs")).status).toBe("needs_input");
+    expect(adapter.calls.send).toEqual([]);
+    broker.answer(broker.pending(task.id)[0]!.id, { allow: true });
+    await runner.idle();
+
+    expect(adapter.calls.send).toEqual(["use tabs"]);
+    expect(store.getTask(task.id)).toMatchObject({ status: "review", turns: 2 });
+  });
+
+  it("interrupt with a queued message ends at the current turn and shows the message as not sent", async () => {
+    const { store, runner, adapter, create, events, commits } = await setup([edit("a.txt"), hold, done], {
+      fake: { messageTurn: orphanTurn },
+    });
+    const task = await create();
+    await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
+    await runner.message(task.id, "more");
+
+    await runner.interrupt(task.id);
+    await runner.idle();
+    await adapter.settled();
+
+    const t = store.getTask(task.id)!;
+    expect(t).toMatchObject({ status: "review", turns: 1, pendingMessage: null });
+    expect(adapter.calls.send).toEqual([]);
     expect(commits(t.branch!)).toEqual(["Fix it (turn 1)"]);
     const texts = events.flatMap((e) =>
       e.payload.kind === "agent.event" && e.payload.event.type === "text" ? [e.payload.event.text] : [],
     );
     expect(texts).not.toContain("received: more");
-    // The agent had already read the message; only killing the run keeps that turn from running
-    // in a worktree that is now in review.
-    await adapter.settled();
     expect(existsSync(join(t.worktreePath!, "orphan.txt"))).toBe(false);
     expect(git(t.worktreePath!, "status", "--porcelain")).toBe("");
     // The dropped message is shown, not lost silently.
-    expect(store.getTask(task.id)!.error).toBe('Not sent: "more"');
+    expect(t.error).toBe('Not sent: "more"');
   });
 
-  it("cancel with a queued live message leaves no orphan edits", async () => {
-    const { repo, store, broker, runner, adapter, create } = await setup(
-      [edit("a.txt"), waitForMessage, { permission }, done],
-      { fake: { messageTurn: orphanTurn } },
-    );
+  it("cancel with a queued message shows it as not sent and leaves no orphan edits", async () => {
+    const { repo, store, runner, adapter, create } = await setup([edit("a.txt"), hold, done], {
+      fake: { messageTurn: orphanTurn },
+    });
     const task = await create();
     await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
     await runner.message(task.id, "more");
-    await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
     const before = store.getTask(task.id)!;
 
     const t = await runner.cancel(task.id);
@@ -250,41 +268,77 @@ describe("TaskRunner lifecycle", () => {
 
     expect(t.status).toBe("cancelled");
     expect(t.error).toBe('Not sent: "more"');
+    expect(t.pendingMessage).toBeNull();
+    expect(adapter.calls.send).toEqual([]);
     expect(existsSync(before.worktreePath!)).toBe(false);
     expect(git(repo.path, "ls-tree", "--name-only", before.branch!)).not.toContain("orphan.txt");
     expect(git(repo.path, "show", `${before.branch}:a.txt`)).toBe("a.txt from the agent\n");
   });
 
-  it("a message the session refuses waits for the turn end and resumes with it", async () => {
+  it("restart: a message queued for the turn end is delivered when the task resumes", async () => {
+    const first = await setup([session, edit("a.txt"), hold, done]);
+    const task = await first.create();
+    await vi.waitFor(() => expect(first.store.getTask(task.id)!.status).toBe("running"));
+    await first.runner.message(task.id, "add b");
+
+    // The daemon dies mid-turn; a new one starts on the same store and home.
+    const second = boot(first.env, [done]);
+    expect(await second.runner.recoverOnStart()).toBe(1);
+    expect(first.store.getTask(task.id)!.status).toBe("interrupted");
+    await second.runner.resume(task.id);
+    await second.runner.idle();
+
+    expect(second.adapter.calls.resume).toHaveLength(1);
+    expect(second.adapter.calls.resume[0]).toMatchObject({ sessionId: "s-1" });
+    const delivered = second.adapter.calls.resume[0]!.message;
+    expect(delivered).toContain("add b");
+    expect(delivered).toContain("Continue where you left off.");
+    const t = first.store.getTask(task.id)!;
+    expect(t).toMatchObject({ status: "review", pendingMessage: null, error: null });
+    expect(first.commits(t.branch!)).toEqual(["Fix it (turn 1)"]);
+  });
+
+  it("restart: a message to the task keeps the one queued before the restart", async () => {
+    const first = await setup([session, hold, done]);
+    const task = await first.create();
+    await vi.waitFor(() => expect(first.store.getTask(task.id)!.status).toBe("running"));
+    await first.runner.message(task.id, "add b");
+
+    const second = boot(first.env, [done]);
+    await second.runner.recoverOnStart();
+    await second.runner.message(task.id, "and c");
+    await second.runner.idle();
+
+    expect(second.adapter.calls.resume).toMatchObject([{ sessionId: "s-1", message: "add b\n\nand c" }]);
+  });
+
+  it("a message the session refuses at the turn end resumes the session with it", async () => {
     const { store, broker, runner, adapter, create } = await setup([session, { permission }, done], {
       fake: { refuseSends: true },
     });
     const task = await create();
     await vi.waitFor(() => expect(broker.pending(task.id)).toHaveLength(1));
 
-    const sent = runner.message(task.id, "use tabs");
+    await runner.message(task.id, "use tabs");
     broker.answer(broker.pending(task.id)[0]!.id, { allow: true });
-    await sent;
     await runner.idle();
 
     expect(adapter.calls.send).toEqual([]);
     expect(adapter.calls.resume).toMatchObject([{ sessionId: "s-1", message: "use tabs" }]);
-    expect(store.getTask(task.id)!.status).toBe("review");
+    expect(store.getTask(task.id)).toMatchObject({ status: "review", turns: 2, pendingMessage: null });
   });
 
-  it("message during a running turn is a conflict when the agent can't take live messages", async () => {
-    const { store, runner, adapter, create } = await setup([waitForMessage, done]);
+  it("an agent without live messages takes a message during a turn at the turn end", async () => {
+    const { store, runner, adapter, create } = await setup([hold, done]);
     (adapter.capabilities as { liveMessages: boolean }).liveMessages = false;
     const task = await create();
     await vi.waitFor(() => expect(store.getTask(task.id)!.status).toBe("running"));
 
-    const err = await runner.message(task.id, "use tabs").catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(RunnerError);
-    expect(err).toMatchObject({ code: "conflict", message: expect.stringMatching(/interrupt/i) });
-    expect(adapter.calls.send).toEqual([]);
-
-    await runner.interrupt(task.id);
+    await runner.message(task.id, "use tabs");
+    adapter.release();
     await runner.idle();
+
+    expect(adapter.calls.send).toEqual(["use tabs"]);
     expect(store.getTask(task.id)!.status).toBe("review");
   });
 
@@ -331,30 +385,30 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("a follow-up waits for a free slot", async () => {
-    const { store, runner, adapter, create } = await setup([session, waitForMessage, done], {
+    const { store, runner, adapter, create } = await setup([session, hold, done], {
       maxConcurrent: 1,
     });
     const a = await create();
     await vi.waitFor(() => expect(store.getTask(a.id)!.status).toBe("running"));
-    await runner.message(a.id, "go");
+    adapter.release();
     await runner.idle();
     expect(store.getTask(a.id)!.status).toBe("review");
 
-    // B holds the only slot while its agent waits for a message.
+    // B holds the only slot while its turn is held.
     const b = await create({ prompt: "Other" });
     await vi.waitFor(() => expect(store.getTask(b.id)!.status).toBe("running"));
     await runner.message(a.id, "more");
     expect(store.getTask(a.id)!.status).toBe("queued");
     expect(adapter.calls.resume).toEqual([]);
 
-    await runner.message(b.id, "go");
+    adapter.release();
     await runner.idle();
     expect(store.getTask(a.id)!.status).toBe("review");
     expect(adapter.calls.resume).toHaveLength(1);
   });
 
   it("interrupt ends the turn as review, not failed", async () => {
-    const { store, runner, create, statuses, commits } = await setup([edit("a.txt"), waitForMessage, done]);
+    const { store, runner, create, statuses, commits } = await setup([edit("a.txt"), hold, done]);
     const task = await create();
     await vi.waitFor(() =>
       expect(existsSync(join(store.getTask(task.id)!.worktreePath ?? "/nope", "a.txt"))).toBe(true),
@@ -383,7 +437,7 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("restart: running task with uncommitted edits becomes interrupted and keeps them; resume commits them", async () => {
-    const first = await setup([session, edit("a.txt"), waitForMessage, done]);
+    const first = await setup([session, edit("a.txt"), hold, done]);
     const task = await first.create();
     await vi.waitFor(() =>
       expect(existsSync(join(first.store.getTask(task.id)!.worktreePath ?? "/nope", "a.txt"))).toBe(true),
@@ -575,7 +629,7 @@ describe("TaskRunner lifecycle", () => {
 
   it("cancel from running stops the agent and discards", async () => {
     const { repo, store, runner, adapter, create, statuses, commits } = await setup(
-      [edit("a.txt"), waitForMessage, done],
+      [edit("a.txt"), hold, done],
       { maxConcurrent: 1 },
     );
     const task = await create();
@@ -649,7 +703,7 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("cancel still finishes when the agent's interrupt hangs", async () => {
-    const { repo, store, runner, create, commits } = await setup([edit("a.txt"), waitForMessage, done], {
+    const { repo, store, runner, create, commits } = await setup([edit("a.txt"), hold, done], {
       fake: { hangInterrupt: true },
       stopGraceMs: 20,
     });
@@ -778,7 +832,7 @@ describe("TaskRunner lifecycle", () => {
   });
 
   it("cancel from queued goes straight to cancelled", async () => {
-    const { store, runner, create, statuses } = await setup([waitForMessage, done], { maxConcurrent: 1 });
+    const { store, runner, create, statuses } = await setup([hold, done], { maxConcurrent: 1 });
     const a = await create();
     const b = await create();
     expect(store.getTask(b.id)!.status).toBe("queued");
