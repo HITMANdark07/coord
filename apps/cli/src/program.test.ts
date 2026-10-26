@@ -63,13 +63,9 @@ const permission = (id: string, over: Record<string, unknown> = {}) => ({
   createdAt: "2026-10-26T00:00:00.000Z",
   ...over,
 });
-/** A daemon with three pending permission requests; answers are accepted (204). */
-const permissionDaemon = () =>
-  fakeTransport((req) =>
-    req.method === "GET" && req.path.startsWith("/permissions")
-      ? [permission(PERM_A), permission(PERM_B), permission(PERM_C)]
-      : undefined,
-  );
+/** A daemon with three pending permission requests (or `pending`); answers are accepted (204). */
+const permissionDaemon = (pending = [permission(PERM_A), permission(PERM_B), permission(PERM_C)]) =>
+  fakeTransport((req) => (req.method === "GET" && req.path.startsWith("/permissions") ? pending : undefined));
 const requested = (request: ReturnType<typeof permission>, seq = 1) =>
   ({
     seq,
@@ -223,6 +219,18 @@ describe("coord cli", () => {
     });
   });
 
+  it("allow and deny echo what they answered", async () => {
+    const transport = permissionDaemon([
+      permission(PERM_A, { input: { command: "git push --force" } }),
+      permission(PERM_C, { tool: "Write", input: { file_path: "/w/src/a.ts", content: "x" } }),
+    ]);
+    const client = createClient(transport);
+    expect(await run(client, "allow", "dddd", "--always")).toEqual([
+      `allowed ${PERM_A} (always): Bash git push --force`,
+    ]);
+    expect(await run(client, "deny", "cccc")).toEqual([`denied ${PERM_C}: Write /w/src/a.ts`]);
+  });
+
   it("allow and deny resolve permission id prefixes like task ids", async () => {
     const transport = permissionDaemon();
     const client = createClient(transport);
@@ -302,7 +310,7 @@ describe("coord cli", () => {
     const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
     const result = await watch(transport, ID_A, {
       act: () => {
-        transport.emit(requested(permission(PERM_A, { input: { command: "rm -rf build\nls" } })));
+        transport.emit(requested(permission(PERM_A, { input: { command: "rm -rf build\nls\tx" } })));
         transport.emit(
           requested(
             permission(PERM_B, {
@@ -320,13 +328,36 @@ describe("coord cli", () => {
       },
     });
     const [bash, edit, other] = result.lines.filter((l) => l.startsWith("permission "));
-    expect(bash).toBe(`permission ${PERM_A}: Bash rm -rf build ls  [--always available]`);
+    // A newline is shown, not hidden as a space: the second line is a second command.
+    expect(bash).toBe(`permission ${PERM_A}: Bash rm -rf build⏎ls x  [--always available]`);
     expect(edit).toBe(`permission ${PERM_B}: Edit /w/src/a.ts`);
     expect(other).toMatch(
       new RegExp(`^permission ${PERM_C}: mcp__x__y \\{"q":"a+…  \\[--always available\\]$`),
     );
     const summary = other!.slice(`permission ${PERM_C}: mcp__x__y `.length, other!.indexOf("  ["));
     expect(summary.length).toBeLessThanOrEqual(120);
+  });
+
+  it("permission summaries strip control characters and keep the file name of a long path", async () => {
+    const transport = daemon((req) => (req.path === `/tasks/${ID_A}` ? task(ID_A) : undefined));
+    const longPath = `/Users/me/.coord/worktrees/repo-1234/${"deep/".repeat(40)}the-file.ts`;
+    const result = await watch(transport, ID_A, {
+      act: () => {
+        // An ESC sequence that would erase the line and show something harmless instead.
+        const command = "echo safe\u001b[2K\u001b]0;title\u0007\rrm -rf ~\u009b1A\nls";
+        transport.emit(requested(permission(PERM_A, { input: { command }, title: "Run\u001b[8m it" })));
+        transport.emit(requested(permission(PERM_B, { tool: "Write", input: { file_path: longPath } }), 2));
+        transport.emit(updated(ID_A, "review", 3));
+      },
+    });
+    const [bash, write] = result.lines.filter((l) => l.startsWith("permission "));
+    expect(bash).toBe(
+      `permission ${PERM_A}: Bash echo safe[2K]0;titlerm -rf ~1A⏎ls (Run[8m it)  [--always available]`,
+    );
+    expect(result.lines.join("\n")).not.toMatch(/(?!\n)\p{Cc}/u);
+    const summary = write!.slice(`permission ${PERM_B}: Write `.length, write!.indexOf("  ["));
+    expect(summary.length).toBe(120);
+    expect(summary).toMatch(/^\/Users\/me\/.+….+\/deep\/the-file\.ts$/);
   });
 
   it("watch exits 1 with the error, on stderr, for a task parked by a failed commit", async () => {
@@ -402,17 +433,17 @@ describe("coord cli", () => {
             taskId: ID_A,
             toolUseId: "u",
             tool: "Bash",
-            input: { command: "git push --force" },
+            input: { command: "git push --force", description: "Push\u001b[8m\u009b" },
             canRemember: true,
             createdAt: "x",
           },
         ];
       }
       return {
-        ...task(ID_A, "failed"),
+        ...task(ID_A, "failed", "A task\u001b[2J"),
         branch: "agent/a",
         worktreePath: "/wt/a",
-        error: "boom",
+        error: "boom\u001b[2J",
         inputTokens: 5,
         outputTokens: 7,
         costUsd: 0.5,
@@ -424,8 +455,19 @@ describe("coord cli", () => {
     expect(out).toContain("/wt/a");
     expect(out).toContain("5 in / 7 out");
     expect(out).toContain("$0.5000");
-    expect(out).toContain("error:    boom");
+    expect(out).toContain(`${ID_A}  A task[2J`);
+    expect(out).toContain("error:    boom[2J");
     expect(out).toContain("perm-1  Bash  git push --force  [--always available]");
+    // The full input under it, as JSON: control characters arrive escaped, never raw.
+    expect(out).toContain(
+      [
+        "      {",
+        '        "command": "git push --force",',
+        '        "description": "Push\\u001b[8m\\u009b"',
+        "      }",
+      ].join("\n"),
+    );
+    expect(out).not.toMatch(/(?!\n)\p{Cc}/u);
     expect(out).toContain("step 25");
     expect(out).toContain("step 6");
     expect(out).not.toContain("step 5\n");

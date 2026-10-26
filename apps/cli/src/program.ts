@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Command, Option } from "commander";
 import type { CoordClient, DaemonEventListener } from "@coord/client";
-import { resolvePermissionId, resolveTaskId } from "./resolve-task";
+import { resolvePermission, resolveTaskId } from "./resolve-task";
 
 // `pnpm coord` runs this script from apps/cli; INIT_CWD is the directory the user ran it in.
 const userCwd = () => process.env.INIT_CWD ?? process.cwd();
@@ -30,9 +30,24 @@ const WATCH_END: Record<string, number> = {
   interrupted: 1,
 };
 
-const oneLine = (text: string, max = 200) => {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+/**
+ * C0 and C1 control characters (other than tab and newline, which callers render) and bidi
+ * overrides. Agent text and tool input reach the terminal through here: an ESC sequence could
+ * erase or recolor part of a command the user is about to allow, a bidi override reorder it.
+ */
+const CONTROL = /(?![\t\n])[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu;
+const stripControl = (text: string) => text.replace(CONTROL, "");
+
+/**
+ * One terminal-safe line of at most `max` characters. `cut: "middle"` keeps the end, for paths
+ * whose file name is what the user must see (acceptance run 2, D3).
+ */
+const oneLine = (text: string, max = 200, cut: "end" | "middle" = "end") => {
+  const flat = stripControl(text).replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  if (cut === "end") return `${flat.slice(0, max - 1)}…`;
+  const tail = Math.ceil(((max - 1) * 2) / 3);
+  return `${flat.slice(0, max - 1 - tail)}…${flat.slice(-tail)}`;
 };
 
 /** Tools whose input names the file they change; the path is what the user must judge. */
@@ -42,27 +57,43 @@ const SUMMARY_MAX = 120;
 /**
  * What a permission prompt would let the agent do, on one line (acceptance D2): the tool name
  * alone can't be judged. The Bash command, the file an edit writes, or else the input as JSON.
+ * A newline shows as ⏎: a second line of a Bash command is a second command.
  */
 function inputSummary(p: Pick<PermissionRequestView, "tool" | "input">): string {
   const input = (typeof p.input === "object" && p.input !== null ? p.input : {}) as Record<string, unknown>;
   const pick = (...keys: string[]) =>
     keys.map((k) => input[k]).find((v) => typeof v === "string") as string | undefined;
-  const text =
-    (p.tool === "Bash" ? pick("command") : undefined) ??
-    (FILE_TOOLS.includes(p.tool) ? pick("file_path", "notebook_path", "path") : undefined) ??
-    JSON.stringify(p.input) ??
-    "";
-  return oneLine(text, SUMMARY_MAX);
+  const path = FILE_TOOLS.includes(p.tool) ? pick("file_path", "notebook_path", "path") : undefined;
+  if (path !== undefined) return oneLine(path, SUMMARY_MAX, "middle");
+  const text = (p.tool === "Bash" ? pick("command") : undefined) ?? JSON.stringify(p.input) ?? "";
+  return oneLine(text.replace(/\r?\n/g, "⏎"), SUMMARY_MAX);
+}
+
+/** `<tool> <input summary>`: what a permission answer applies to. */
+function describeAction(p: Pick<PermissionRequestView, "tool" | "input">, sep = " "): string {
+  const summary = inputSummary(p);
+  return `${oneLine(p.tool)}${summary ? `${sep}${summary}` : ""}`;
 }
 
 /** `<tool> <input summary> (<title>)`, plus whether `coord allow --always` applies. */
 function describePermission(p: PermissionRequestView, sep = " "): string {
-  const summary = inputSummary(p);
   return (
-    `${p.tool}${summary ? `${sep}${summary}` : ""}` +
+    describeAction(p, sep) +
     `${p.title ? `${sep}(${oneLine(p.title)})` : ""}` +
     `${p.canRemember ? "  [--always available]" : ""}`
   );
+}
+
+/**
+ * The whole tool input, indented under a pending permission in `coord show`: the summary leaves
+ * fields out. JSON escapes C0 controls; C1 controls and bidi overrides are escaped the same way,
+ * so the user sees they are there.
+ */
+function fullInput(input: unknown, indent: string): string[] {
+  const escape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  return (JSON.stringify(input, null, 2) ?? "undefined")
+    .split("\n")
+    .map((l) => indent + l.replace(CONTROL, escape));
 }
 
 /** A task parked by a failed commit: needs_input with an error and no agent waiting on a prompt. */
@@ -216,17 +247,20 @@ export function buildProgram(
         client.taskEvents(taskId),
         client.listPermissions(taskId),
       ]);
-      log(`${task.id}  ${task.title}`);
+      log(`${task.id}  ${stripControl(task.title)}`);
       log(`status:   ${task.status}`);
       log(`branch:   ${task.branch ?? "-"}`);
       log(`worktree: ${task.worktreePath ?? "-"}`);
       log(
         `usage:    ${task.inputTokens} in / ${task.outputTokens} out tokens · $${task.costUsd.toFixed(4)} · ${task.turns} turns`,
       );
-      if (task.error) log(`error:    ${task.error}`);
+      if (task.error) log(`error:    ${stripControl(task.error)}`);
       if (pending.length > 0) {
         log("pending permissions:");
-        for (const p of pending) log(`  ${p.id}  ${describePermission(p, "  ")}`);
+        for (const p of pending) {
+          log(`  ${p.id}  ${describePermission(p, "  ")}`);
+          for (const l of fullInput(p.input, "      ")) log(l);
+        }
       }
       const lines = events.flatMap((e) => describeEvent(e, taskId) ?? []).slice(-20);
       if (lines.length > 0) {
@@ -301,9 +335,10 @@ export function buildProgram(
     .argument("<permissionId>", "permission id or unique prefix")
     .option("--always", "also allow it for the rest of the session")
     .action(async (input: string, opts: { always?: boolean }) => {
-      const permissionId = await resolvePermissionId(client, input);
-      await client.answerPermission(permissionId, { allow: true, ...(opts.always && { remember: true }) });
-      log(`allowed ${permissionId}${opts.always ? " (always)" : ""}`);
+      const p = await resolvePermission(client, input);
+      await client.answerPermission(p.id, { allow: true, ...(opts.always && { remember: true }) });
+      // What was allowed, not only its id: a prefix could have matched another prompt than meant.
+      log(`allowed ${p.id}${opts.always ? " (always)" : ""}: ${describeAction(p)}`);
     });
 
   program
@@ -312,12 +347,12 @@ export function buildProgram(
     .argument("<permissionId>", "permission id or unique prefix")
     .option("--reason <text>", "tell the agent why")
     .action(async (input: string, opts: { reason?: string }) => {
-      const permissionId = await resolvePermissionId(client, input);
-      await client.answerPermission(permissionId, {
+      const p = await resolvePermission(client, input);
+      await client.answerPermission(p.id, {
         allow: false,
         ...(opts.reason !== undefined && { reason: opts.reason }),
       });
-      log(`denied ${permissionId}`);
+      log(`denied ${p.id}: ${describeAction(p)}`);
     });
 
   program

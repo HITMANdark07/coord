@@ -34,12 +34,15 @@ export async function resolveTaskId(client: CoordClient, input: string): Promise
   );
 }
 
+type PermissionRequestView = Awaited<ReturnType<CoordClient["listPermissions"]>>[number];
+
 /** Resolves a pending permission request's full id or unique prefix (`coord allow|deny`). */
-export async function resolvePermissionId(client: CoordClient, input: string): Promise<string> {
+export async function resolvePermission(client: CoordClient, input: string): Promise<PermissionRequestView> {
   const pending = await client.listPermissions();
-  return resolveId(
+  const id = resolveId(
     "pending permission",
     pending.map((p) => ({ id: p.id, label: `${p.tool} (task ${p.taskId.slice(0, 8)})` })),
     input,
   );
+  return pending.find((p) => p.id === id)!;
 }
