@@ -31,6 +31,22 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+/** Git env with an isolated config and no identity, so `git commit` fails. */
+async function noIdentityGitEnv(): Promise<Record<string, string>> {
+  const isolated = await mkdtemp(join(tmpdir(), "coord-runner-git-"));
+  cleanup.push(isolated);
+  return {
+    HOME: isolated,
+    GIT_CONFIG_GLOBAL: join(isolated, "gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "",
+    GIT_AUTHOR_EMAIL: "",
+    GIT_COMMITTER_NAME: "",
+    GIT_COMMITTER_EMAIL: "",
+    EMAIL: "",
+  };
+}
+
 async function setup(
   script: FakeStep[],
   opts: { maxConcurrent?: number; gitEnv?: Record<string, string>; config?: object } = {},
@@ -228,18 +244,7 @@ describe("TaskRunner", () => {
   });
 
   it("commit failure → needs_input, worktree untouched", async () => {
-    const isolated = await mkdtemp(join(tmpdir(), "coord-runner-git-"));
-    cleanup.push(isolated);
-    const gitEnv = {
-      HOME: isolated,
-      GIT_CONFIG_GLOBAL: join(isolated, "gitconfig"),
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_AUTHOR_NAME: "",
-      GIT_AUTHOR_EMAIL: "",
-      GIT_COMMITTER_NAME: "",
-      GIT_COMMITTER_EMAIL: "",
-      EMAIL: "",
-    };
+    const gitEnv = await noIdentityGitEnv();
     const { repo, store, runner, create } = await setup([editA, done], { gitEnv });
     const task = await create();
     await runner.idle();
@@ -326,5 +331,68 @@ describe("TaskRunner", () => {
     expect(spec.env?.COORD_TASK_ID).toBe(task.id);
     expect(spec.prompt).toBe("Fix it\nwith more detail");
     expect(store.getTask(task.id)!.portBase).toBe(41000);
+  });
+
+  it("a task parked by a failed commit holds no concurrency slot", async () => {
+    const gitEnv = await noIdentityGitEnv();
+    const { repo, store, broker, runner, create } = await setup([{ permission }, editA, done], {
+      maxConcurrent: 1,
+      gitEnv,
+    });
+    const a = await create();
+    const b = await create();
+    await vi.waitFor(() => expect(store.getTask(a.id)!.status).toBe("needs_input"));
+    broker.answer(broker.pending(a.id)[0]!.id, { allow: true });
+
+    // A's commit fails and it parks in needs_input with no agent; B gets the only slot (spec §5).
+    await vi.waitFor(() => expect(broker.pending(b.id)).toHaveLength(1));
+    const parked = store.getTask(a.id)!;
+    expect(parked.status).toBe("needs_input");
+    expect(parked.error).toMatch(/^commit failed: /);
+
+    // The runner reads gitEnv at commit time: give B's commit an identity.
+    Object.assign(gitEnv, repo.env);
+    broker.answer(broker.pending(b.id)[0]!.id, { allow: true });
+    await runner.idle();
+
+    expect(store.getTask(b.id)!.status).toBe("review");
+    expect(store.getTask(a.id)!.status).toBe("needs_input");
+  });
+
+  it("branches from the config's baseBranch and runs that branch's setup", async () => {
+    const { repo, store, runner, create } = await setup([done], {
+      config: { baseBranch: "dev", setup: ["echo main > setup-ran.txt"] },
+    });
+    const g = (...args: string[]) =>
+      execFileSync("git", args, { cwd: repo.path, env: { ...process.env, ...repo.env }, encoding: "utf8" });
+    g("switch", "-c", "dev");
+    await writeFile(
+      join(repo.path, ".coord/config.json"),
+      JSON.stringify({ setup: ["echo dev > setup-ran.txt"] }),
+    );
+    await writeFile(join(repo.path, "dev-only.txt"), "dev\n");
+    g("add", "-A");
+    g("-c", "commit.gpgsign=false", "commit", "-m", "dev");
+    g("switch", "main");
+
+    const task = await create();
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("review");
+    expect(t.baseBranch).toBe("dev");
+    expect(g("merge-base", t.branch!, "dev")).toBe(g("rev-parse", "dev"));
+    expect(existsSync(join(t.worktreePath!, "dev-only.txt"))).toBe(true);
+    expect(await readFile(join(t.worktreePath!, "setup-ran.txt"), "utf8")).toBe("dev\n");
+  });
+
+  it("an explicit baseBranch wins over the config's", async () => {
+    const { repo, store, runner, create } = await setup([done], { config: { baseBranch: "dev" } });
+    execFileSync("git", ["branch", "dev"], { cwd: repo.path });
+    execFileSync("git", ["branch", "other"], { cwd: repo.path });
+    const task = await create({ baseBranch: "other" });
+    await runner.idle();
+
+    expect(store.getTask(task.id)!.baseBranch).toBe("other");
   });
 });

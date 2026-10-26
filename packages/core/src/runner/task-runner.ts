@@ -34,7 +34,7 @@ export interface TaskRunnerDeps {
   adapters: Partial<Record<AgentId, AgentAdapter>>;
   /** COORD_HOME; worktrees live under `<home>/worktrees`. */
   home: string;
-  /** Tasks allowed in ACTIVE_STATUSES at once (spec §5). */
+  /** Tasks allowed to hold an agent slot at once (spec §5); see `holdsSlot`. */
   maxConcurrent: number;
   /**
    * Extra env for commits. Production passes nothing so the user's own identity and signing
@@ -43,7 +43,7 @@ export interface TaskRunnerDeps {
   gitEnv?: Record<string, string>;
 }
 
-/** Statuses that hold an agent slot (spec §5 concurrency). */
+/** Statuses in which a task may hold an agent slot (spec §5 concurrency); see `holdsSlot`. */
 const ACTIVE_STATUSES: TaskStatus[] = ["setting_up", "running", "needs_input"];
 
 /**
@@ -184,12 +184,21 @@ export class TaskRunner {
   /** Starts queued tasks, oldest first, while slots are free. */
   private schedule(): void {
     const { store, maxConcurrent } = this.deps;
-    let free = maxConcurrent - store.listTasks({ statuses: ACTIVE_STATUSES }).length;
+    let free =
+      maxConcurrent - store.listTasks({ statuses: ACTIVE_STATUSES }).filter((t) => this.holdsSlot(t)).length;
     for (const task of store.listTasks({ statuses: ["queued"] }).reverse()) {
       if (free-- <= 0) break;
       // start() moves the task to setting_up synchronously, before its first await.
       this.track(task.id, () => this.start(task));
     }
+  }
+
+  /**
+   * Only working tasks count toward the cap (spec §5). A needs_input task counts while its agent
+   * waits on a prompt, but not once it is parked (a failed commit) with no agent running.
+   */
+  private holdsSlot(task: TaskRecord): boolean {
+    return task.status !== "needs_input" || this.live.has(task.id);
   }
 
   private async start(task: TaskRecord): Promise<void> {
@@ -213,16 +222,23 @@ export class TaskRunner {
     const repo = store.getRepo(task.repoId);
     if (!repo) return this.fail(task.id, "setup: repo is no longer registered");
     try {
-      const baseBranch = task.baseBranch ?? repo.defaultBranch;
-      const { config, branch, worktreePath } = await this.withRepoLock(repo.id, async () => {
-        const { ref } = await resolveBaseRef(repo.path, baseBranch);
+      const { config, baseBranch, branch, worktreePath } = await this.withRepoLock(repo.id, async () => {
+        let baseBranch = task.baseBranch ?? repo.defaultBranch;
+        let { ref } = await resolveBaseRef(repo.path, baseBranch);
         // setup/checks come from the base ref, never the task branch (spec §7).
-        const config = await readRepoConfig(repo.path, ref);
+        let config = await readRepoConfig(repo.path, ref);
+        // Without an explicit base, the config's baseBranch picks it (spec §7). Its setup and
+        // checks are then read again from that base, the one the task actually starts from.
+        if (task.baseBranch === null && config.baseBranch && config.baseBranch !== baseBranch) {
+          baseBranch = config.baseBranch;
+          ({ ref } = await resolveBaseRef(repo.path, baseBranch));
+          config = await readRepoConfig(repo.path, ref);
+        }
         const branch = task.branch ?? (await uniqueBranch(repo.path, BRANCH_PREFIX + slugify(task.title)));
         const dir = branch.slice(BRANCH_PREFIX.length).replaceAll("/", "-");
         const worktreePath = join(home, "worktrees", `${repo.name}-${repo.id}`, dir);
         await createWorktree({ repoPath: repo.path, worktreePath, branch, baseRef: ref });
-        return { config, branch, worktreePath };
+        return { config, baseBranch, branch, worktreePath };
       });
       // Recorded right away so a later failure or restart still knows where the work is.
       store.updateTask(task.id, { branch, baseBranch, worktreePath });
