@@ -1,20 +1,32 @@
-import { useDaemonStatus, useTasks } from "@coord/app-state";
-import { colors, fontSize, radius, space, statusColors } from "@coord/design-tokens";
-import type { Task } from "@coord/protocol";
+import { useState } from "react";
+import { useDaemonStatus } from "@coord/app-state";
+import { colors, fontSize, radius, space } from "@coord/design-tokens";
+import { Board } from "./board/board";
+import { ErrorBoundary } from "./error-boundary";
+
+export type Notify = (n: { title: string; body: string; onClick: () => void }) => void;
+export interface AppPlatform {
+  pickFolder?: () => Promise<string | null>;
+  notify?: Notify;
+}
 
 const c = colors.light;
 
 /** Root screen shared by the desktop window and the PWA. Each app wraps it in <ClientProvider>. */
-export function App({ surface }: { surface: "desktop" | "web" }) {
+export function App({ surface }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
+  // Task 5 renders the panel for this id; Task 7 opens the new-task form.
+  const [, setOpenTaskId] = useState<string | null>(null);
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", color: c.text, padding: space.xl, maxWidth: 880 }}>
-      <header style={{ display: "flex", alignItems: "baseline", gap: space.md, marginBottom: space.xl }}>
-        <h1 style={{ fontSize: fontSize.xxl, margin: 0 }}>Coord</h1>
-        <span style={{ color: c.muted, fontSize: fontSize.sm }}>{surface}</span>
-      </header>
-      <DaemonBanner />
-      <TaskList />
-    </main>
+    <ErrorBoundary>
+      <main style={{ fontFamily: "system-ui, sans-serif", color: c.text, padding: space.xl }}>
+        <header style={{ display: "flex", alignItems: "baseline", gap: space.md, marginBottom: space.lg }}>
+          <h1 style={{ fontSize: fontSize.xxl, margin: 0 }}>Coord</h1>
+          <span style={{ color: c.muted, fontSize: fontSize.sm }}>{surface}</span>
+        </header>
+        <DaemonBanner />
+        <Board onOpen={setOpenTaskId} onNewTask={() => {}} />
+      </main>
+    </ErrorBoundary>
   );
 }
 
@@ -38,34 +50,5 @@ function DaemonBanner() {
     >
       {text}
     </p>
-  );
-}
-
-function TaskList() {
-  const tasks = useTasks();
-  if (tasks.status !== "ok") return null;
-  if (tasks.data.length === 0) return <p style={{ color: c.muted }}>No tasks yet.</p>;
-  return (
-    <ul style={{ listStyle: "none", padding: 0 }}>
-      {tasks.data.map((t) => (
-        <TaskRow key={t.id} task={t} />
-      ))}
-    </ul>
-  );
-}
-
-function TaskRow({ task }: { task: Task }) {
-  return (
-    <li
-      style={{
-        display: "flex",
-        gap: space.md,
-        padding: `${space.sm}px 0`,
-        borderBottom: `1px solid ${c.border}`,
-      }}
-    >
-      <span style={{ color: statusColors[task.status], minWidth: 96 }}>{task.status}</span>
-      <span>{task.title}</span>
-    </li>
   );
 }
