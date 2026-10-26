@@ -1,11 +1,19 @@
 import { z } from "zod";
+import { Repo } from "./repo";
 import { Task } from "./task";
 
 /** Agent-neutral events every adapter emits, see PRD §7.3. */
 export const AgentEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session"), sessionId: z.string() }),
-  z.object({ type: z.literal("text"), text: z.string() }),
-  z.object({ type: z.literal("tool_call"), toolUseId: z.string(), name: z.string(), input: z.unknown() }),
+  z.object({ type: z.literal("text"), text: z.string(), parentToolUseId: z.string().optional() }),
+  z.object({
+    type: z.literal("tool_call"),
+    toolUseId: z.string(),
+    name: z.string(),
+    input: z.unknown(),
+    /** Set when a sub-agent made the call. */
+    parentToolUseId: z.string().optional(),
+  }),
   z.object({ type: z.literal("tool_result"), toolUseId: z.string(), ok: z.boolean() }),
   z.object({
     type: z.literal("permission_request"),
@@ -16,6 +24,7 @@ export const AgentEvent = z.discriminatedUnion("type", [
     title: z.string().optional(),
     canRemember: z.boolean(),
   }),
+  /** Token and cost numbers are running totals for the session, not per-turn deltas. */
   z.object({
     type: z.literal("usage"),
     inputTokens: z.number(),
@@ -28,10 +37,31 @@ export const AgentEvent = z.discriminatedUnion("type", [
 ]);
 export type AgentEvent = z.infer<typeof AgentEvent>;
 
+/** A pending permission prompt as clients see it (PRD FR-4, FR-34). */
+export const PermissionRequestView = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  toolUseId: z.string(),
+  tool: z.string(),
+  input: z.unknown(),
+  title: z.string().optional(),
+  canRemember: z.boolean(),
+  createdAt: z.string(),
+});
+export type PermissionRequestView = z.infer<typeof PermissionRequestView>;
+
 /** What the daemon pushes to subscribers (desktop, PWA, phone). */
 export const DaemonEventPayload = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("task.updated"), task: Task }),
   z.object({ kind: z.literal("agent.event"), taskId: z.string(), event: AgentEvent }),
+  z.object({ kind: z.literal("permission.requested"), request: PermissionRequestView }),
+  z.object({
+    kind: z.literal("permission.resolved"),
+    requestId: z.string(),
+    taskId: z.string(),
+    outcome: z.enum(["allowed", "always", "denied", "withdrawn"]),
+  }),
+  z.object({ kind: z.literal("repo.updated"), repo: Repo }),
 ]);
 export type DaemonEventPayload = z.infer<typeof DaemonEventPayload>;
 
