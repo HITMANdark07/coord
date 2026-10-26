@@ -1,9 +1,8 @@
 import { colors, fontSize, radius, space, statusColors } from "@coord/design-tokens";
 import { displayText, type Task } from "@coord/protocol";
-import { formatElapsed, formatUsage } from "../format";
+import { agentLabel, formatElapsed, formatUsage } from "../format";
 
 const c = colors.light;
-const AGENT_LABELS: Record<string, string> = { "claude-code": "Claude", codex: "Codex" };
 // Finished tasks stop their clock at the last update.
 const ACTIVE = ["queued", "setting_up", "running", "checking", "needs_input"];
 
@@ -46,8 +45,8 @@ export function TaskCard({
         {displayText(task.title)}
       </div>
       <div style={{ color: c.muted, fontSize: fontSize.sm }}>
-        <span>{AGENT_LABELS[task.agent] ?? displayText(task.agent)}</span> ·{" "}
-        {formatElapsed(task.createdAt, end)} · {formatUsage(task, costReporting)}
+        <span>{agentLabel(task.agent)}</span> · {formatElapsed(task.createdAt, end)} ·{" "}
+        {formatUsage(task, costReporting)}
       </div>
       {needsYou && <div style={{ fontSize: fontSize.sm }}>{detail}</div>}
     </button>

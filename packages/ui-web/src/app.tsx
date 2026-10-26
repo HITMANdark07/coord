@@ -4,6 +4,7 @@ import { displayText } from "@coord/protocol";
 import { colors, fontSize, radius, space } from "@coord/design-tokens";
 import { Board } from "./board/board";
 import { ErrorBoundary } from "./error-boundary";
+import { TaskPanel } from "./panel/task-panel";
 import { AddRepo } from "./repos/add-repo";
 import { RepoSwitcher, useSelectedRepo } from "./repos/repo-switcher";
 
@@ -17,8 +18,7 @@ const c = colors.light;
 
 /** Root screen shared by the desktop window and the PWA. Each app wraps it in <ClientProvider>. */
 export function App({ surface, platform }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
-  // Task 5 renders the panel for this id; Task 7 opens the new-task form.
-  const [, setOpenTaskId] = useState<string | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const repos = useRepos();
   const list = repos.status === "loading" ? [] : (repos.data ?? []);
   const [selected, select] = useSelectedRepo(list);
@@ -53,6 +53,15 @@ export function App({ surface, platform }: { surface: "desktop" | "web"; platfor
               <AddRepo platform={platform} onAdded={(repo) => select(repo.id)} />
             </section>
           )
+        )}
+        {openTaskId && (
+          // Keyed so a different task starts on its own Live tab with an empty message box.
+          <TaskPanel
+            key={openTaskId}
+            taskId={openTaskId}
+            surface={surface}
+            onClose={() => setOpenTaskId(null)}
+          />
         )}
       </main>
     </ErrorBoundary>

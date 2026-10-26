@@ -1,4 +1,8 @@
-import type { Task } from "@coord/protocol";
+import { displayText, type Task } from "@coord/protocol";
+
+const AGENT_LABELS: Record<string, string> = { "claude-code": "Claude", codex: "Codex" };
+
+export const agentLabel = (agent: string) => AGENT_LABELS[agent] ?? displayText(agent);
 
 export function formatElapsed(fromIso: string, to: string | Date): string {
   const seconds = Math.max(0, Math.floor((new Date(to).getTime() - Date.parse(fromIso)) / 1000));

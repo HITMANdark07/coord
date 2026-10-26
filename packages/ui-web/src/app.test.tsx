@@ -41,9 +41,11 @@ const renderApp = (health: () => unknown) =>
                     createdAt: "x",
                   },
                 ]
-              : req.path === "/agents"
-                ? []
-                : [task],
+              : req.path === "/tasks/t1"
+                ? task
+                : req.path === "/agents" || !req.path.startsWith("/tasks?")
+                  ? []
+                  : [task],
         ),
       )}
     >
@@ -65,6 +67,17 @@ describe("App", () => {
     expect(await screen.findByText(/Daemon unreachable/)).toBeTruthy();
     expect(await screen.findByText("Add dark mode")).toBeTruthy();
     expect(screen.getByRole("button", { name: "+ New task" })).toBeTruthy();
+  });
+});
+
+describe("App task panel", () => {
+  it("clicking a card opens its panel next to the board, and × closes it", async () => {
+    renderApp(() => ({ ok: true, protocolVersion: "0.1.0", daemonVersion: "0.1.0" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Add dark mode/ }));
+    expect(await screen.findByRole("heading", { name: "Add dark mode" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ New task" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("heading", { name: "Add dark mode" })).toBeNull();
   });
 });
 
