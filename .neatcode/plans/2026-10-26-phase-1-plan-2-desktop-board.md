@@ -19,6 +19,7 @@
 
 ## Global Constraints
 
+- **Ponytail (full level) applies to every task.** Implementers follow `.superpowers/ponytail/ponytail.md` (vendored from github.com/DietrichGebert/ponytail, MIT): make the smallest complete change, add no unrequested options or abstractions, reuse what the repo has, and add no dependencies. Reviewers also apply `.superpowers/ponytail/ponytail-review.md`: every finding needs a concrete failing case, and "lean" findings count. Where ponytail and this plan or AGENTS.md disagree, the plan and AGENTS.md win.
 - **AGENTS.md applies in full.**
   - `pnpm check` exits 0 after every task.
   - Lint boundaries are never loosened.
@@ -179,7 +180,6 @@
   - `packages/ui-web/src/board/board.tsx`
   - `packages/ui-web/src/board/task-card.tsx`
   - `packages/ui-web/src/format.ts`
-  - `packages/ui-web/src/theme.tsx`
   - `packages/ui-web/src/error-boundary.tsx`
   - `packages/ui-web/src/use-now.ts`
 - Modify: `packages/ui-web/src/app.tsx`, `packages/ui-web/src/index.ts`
@@ -230,7 +230,7 @@
       - its first pending permission's `toolInputSummary`, from `usePermissions()` with no id;
       - otherwise its error (`failed`/`interrupted`), or `"interrupted — resume"`.
     - Clicking a card calls `onOpen(task.id)`.
-  - **Theme:** `ThemeStyle` writes CSS custom properties from `colors.light` and `colors.dark`, switched with `prefers-color-scheme`. Components use `var(--coord-*)`.
+  - **Colours:** use `colors.light` and the other tokens, as `app.tsx` does today. Dark mode is not in this plan.
   - **Error boundary:** `ErrorBoundary` wraps the app. On a render error it shows "Something went wrong" and the message, plus a `Reload` button that remounts the children.
   - **Daemon banner:** the existing `DaemonBanner` stays at the top. Its `Daemon unreachable` text stays.
 
