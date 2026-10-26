@@ -7,6 +7,8 @@ import { ErrorBoundary } from "./error-boundary";
 import { TaskPanel } from "./panel/task-panel";
 import { AddRepo } from "./repos/add-repo";
 import { NewTaskForm } from "./new-task/new-task-form";
+import { browserNotifier } from "./notifications/notifier";
+import { useTaskNotifications } from "./notifications/use-task-notifications";
 import { RepoSwitcher, useSelectedRepo } from "./repos/repo-switcher";
 
 export type Notify = (n: { title: string; body: string; onClick: () => void }) => void;
@@ -16,6 +18,7 @@ export interface AppPlatform {
 }
 
 const c = colors.light;
+const noNotify: Notify = () => {};
 
 /** Root screen shared by the desktop window and the PWA. Each app wraps it in <ClientProvider>. */
 export function App({ surface, platform }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
@@ -24,12 +27,15 @@ export function App({ surface, platform }: { surface: "desktop" | "web"; platfor
   const repos = useRepos();
   const list = repos.status === "loading" ? [] : (repos.data ?? []);
   const [selected, select] = useSelectedRepo(list);
+  const notify = platform?.notify ?? browserNotifier();
+  useTaskNotifications(notify ?? noNotify, setOpenTaskId);
   return (
     <ErrorBoundary>
       <main style={{ fontFamily: "system-ui, sans-serif", color: c.text, padding: space.xl }}>
         <header style={{ display: "flex", alignItems: "baseline", gap: space.md, marginBottom: space.lg }}>
           <h1 style={{ fontSize: fontSize.xxl, margin: 0 }}>Coord</h1>
           <span style={{ color: c.muted, fontSize: fontSize.sm }}>{surface}</span>
+          {surface === "web" && !platform?.notify && <EnableNotifications />}
         </header>
         <DaemonBanner />
         {repos.status === "error" && <p role="alert">Could not load repos: {displayText(repos.error)}</p>}
@@ -78,6 +84,19 @@ export function App({ surface, platform }: { surface: "desktop" | "web"; platfor
         )}
       </main>
     </ErrorBoundary>
+  );
+}
+
+/** Browsers only grant permission from a user gesture, so the web surface asks from a click. */
+function EnableNotifications() {
+  const [permission, setPermission] = useState(() =>
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
+  if (permission !== "default") return null;
+  return (
+    <button type="button" onClick={() => void Notification.requestPermission().then(setPermission)}>
+      Enable notifications
+    </button>
   );
 }
 

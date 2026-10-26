@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientProvider } from "@coord/app-state";
 import { createClient } from "@coord/client";
@@ -78,6 +78,29 @@ describe("App task panel", () => {
     expect(screen.getByRole("button", { name: "+ New task" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("heading", { name: "Add dark mode" })).toBeNull();
+  });
+});
+
+describe("App notifications", () => {
+  const health = () => ({ ok: true, protocolVersion: "0.1.0", daemonVersion: "0.1.0" });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Enable notifications asks for permission from the click, then hides", async () => {
+    const requestPermission = vi.fn(async () => "granted");
+    const fake = { permission: "default", requestPermission };
+    vi.stubGlobal("Notification", fake);
+    renderApp(health);
+    expect(requestPermission).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Enable notifications" }));
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Enable notifications" })).toBeNull());
+  });
+
+  it("no button once permission is decided", async () => {
+    vi.stubGlobal("Notification", { permission: "denied", requestPermission: vi.fn() });
+    renderApp(health);
+    await screen.findByText("Add dark mode");
+    expect(screen.queryByRole("button", { name: "Enable notifications" })).toBeNull();
   });
 });
 
