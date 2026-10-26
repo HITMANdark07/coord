@@ -5,7 +5,14 @@ import {
   type SDKUserMessage,
   type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentAdapter, AgentEvent, AgentRun, RunContext } from "@coord/protocol";
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentRun,
+  PermissionMode,
+  RunContext,
+  RunOptions,
+} from "@coord/protocol";
 import { toAgentEvents } from "./events";
 import { createMessageQueue } from "./message-queue";
 
@@ -35,7 +42,8 @@ export function permissionBridge(ctx: RunContext): CanUseTool {
       behavior: "allow",
       updatedInput: decision.updatedInput ?? input,
       ...(decision.remember && !options.suppressAlwaysAllowRule
-        ? { updatedPermissions: options.suggestions }
+        ? // "Always allow" lasts for this session only; never write to the repo's or user's settings.
+          { updatedPermissions: options.suggestions?.map((u) => ({ ...u, destination: "session" as const })) }
         : {}),
     };
   };
@@ -45,13 +53,22 @@ export function permissionBridge(ctx: RunContext): CanUseTool {
  * SDK options for a run. Caller-supplied `extra` (model, resume) goes first so it can never
  * override the guarantees after it: the worktree cwd, the repo's Claude Code setup, permissions.
  */
+const SDK_PERMISSION_MODE: Record<PermissionMode, NonNullable<Options["permissionMode"]>> = {
+  ask: "default",
+  accept_edits: "acceptEdits",
+  bypass: "bypassPermissions",
+};
+
 export function buildOptions(
-  extra: Partial<Options>,
+  extra: RunOptions & { resume?: string },
   ctx: RunContext,
   abortController: AbortController,
 ): Options {
+  const { permissionMode, env, ...rest } = extra;
   return {
-    ...extra,
+    ...rest,
+    ...(permissionMode ? { permissionMode: SDK_PERMISSION_MODE[permissionMode] } : {}),
+    env: { ...process.env, ...env },
     cwd: ctx.cwd,
     settingSources: CLAUDE_SETTING_SOURCES,
     canUseTool: permissionBridge(ctx),
@@ -68,7 +85,8 @@ const userMessage = (text: string): SDKUserMessage => ({
 export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAdapter {
   const runQuery = deps.query ?? query;
 
-  function run(firstMessage: string, ctx: RunContext, extra: Partial<Options>): AgentRun {
+  function run(firstMessage: string, ctx: RunContext, extra: RunOptions & { resume?: string }): AgentRun {
+    const state = { interrupted: false };
     const input = createMessageQueue<SDKUserMessage>();
     input.push(userMessage(firstMessage));
     const abortController = new AbortController();
@@ -84,7 +102,7 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
       ctx.signal.addEventListener("abort", abort, { once: true });
       try {
         session = runQuery({ prompt: input.iterable, options: buildOptions(extra, ctx, abortController) });
-        for await (const msg of session) yield* toAgentEvents(msg);
+        for await (const msg of session) yield* toAgentEvents(msg, state);
       } catch (err) {
         // An abort or a crashed Claude Code process ends the run with an event, not an exception.
         const reason = ctx.signal.aborted ? "run aborted" : err instanceof Error ? err.message : String(err);
@@ -99,6 +117,7 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
       events: events(),
       send: (message) => input.push(userMessage(message)),
       interrupt: async () => {
+        state.interrupted = true;
         await session?.interrupt();
       },
       end: () => input.end(),
@@ -108,7 +127,8 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
   return {
     id: "claude-code",
     capabilities: { resume: true, permissionCallback: true, costReporting: true, liveMessages: true },
-    start: (task, ctx) => run(task.prompt, ctx, task.model ? { model: task.model } : {}),
-    resume: (sessionId, message, ctx) => run(message, ctx, { resume: sessionId }),
+    start: (task, ctx) =>
+      run(task.prompt, ctx, { model: task.model, permissionMode: task.permissionMode, env: task.env }),
+    resume: (sessionId, message, ctx, options) => run(message, ctx, { ...options, resume: sessionId }),
   };
 }
