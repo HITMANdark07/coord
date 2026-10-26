@@ -181,7 +181,8 @@ describe("app-state hooks", () => {
         wrapper: wrapperFor(createClient(transport)),
       });
       await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2, 3, 4]));
-      act(() => transport.setStatus("open")); // first open: the initial load covers it
+      act(() => transport.setStatus("open")); // the socket opened after the load: check the gap too
+      await waitFor(() => expect(transport.requests).toHaveLength(2));
       act(() => transport.setStatus("closed"));
 
       stored = 7; // 5-7 happen while disconnected; a closed gated socket delivers none of them
@@ -191,7 +192,58 @@ describe("app-state hooks", () => {
       act(() => transport.setStatus("open"));
       await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2, 3, 4, 5, 6, 7]));
       expect(transport.requests.map((r) => r.path)).toContain("/tasks/t1/events?sinceSeq=4");
-      expect(transport.requests).toHaveLength(2);
+      expect(transport.requests).toHaveLength(3);
+    });
+
+    it("subscribed while the connection is closed, the first open fetches what fell between load and open", async () => {
+      let stored = 2;
+      const transport = fakeTransport(
+        (req) => {
+          const since = Number(new URL(req.path, "http://x").searchParams.get("sinceSeq") ?? 0);
+          return Array.from({ length: stored }, (_, i) => agentEvent(i + 1)).filter((e) => e.seq > since);
+        },
+        { gateEvents: true },
+      );
+      const { result } = renderHook(() => useTaskEvents("t1"), {
+        wrapper: wrapperFor(createClient(transport)),
+      });
+      await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2]));
+
+      stored = 3; // after the history load, before the socket opened: never pushed
+      act(() => transport.emit(agentEvent(3)));
+      act(() => transport.setStatus("open"));
+      await waitFor(() => expect(seqs(result.current.events)).toEqual([1, 2, 3]));
+      expect(transport.requests.at(-1)?.path).toBe("/tasks/t1/events?sinceSeq=2");
+    });
+
+    it("a failed first load is retried on the first open", async () => {
+      let fail = true;
+      const transport = fakeTransport(
+        () => {
+          if (fail) throw new Error("boom");
+          return [agentEvent(1)];
+        },
+        { gateEvents: true },
+      );
+      const { result } = renderHook(() => useTaskEvents("t1"), {
+        wrapper: wrapperFor(createClient(transport)),
+      });
+      await waitFor(() => expect(result.current.status).toBe("error"));
+      fail = false;
+      act(() => transport.setStatus("open"));
+      await waitFor(() => expect(seqs(result.current.events)).toEqual([1]));
+      expect(transport.requests.at(-1)?.path).toBe("/tasks/t1/events");
+    });
+
+    it("joining a connection that is already open makes no extra fetch", async () => {
+      const transport = fakeTransport(() => [agentEvent(1)]);
+      const client = createClient(transport);
+      const unsubscribe = client.subscribe({}); // another screen holds the open connection
+      act(() => transport.setStatus("open"));
+      const { result } = renderHook(() => useTaskEvents("t1"), { wrapper: wrapperFor(client) });
+      await waitFor(() => expect(result.current.status).toBe("ok"));
+      expect(transport.requests).toHaveLength(1);
+      unsubscribe();
     });
   });
 

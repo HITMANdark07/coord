@@ -43,7 +43,7 @@ export function useTaskEvents(taskId: string): TaskEventsState {
   useEffect(() => {
     let active = true;
     let lastSeq: number | undefined;
-    let opens = 0;
+    let subscribing = true;
     let historyLoaded = false;
     const setState = (update: (s: TaskEventsState) => TaskEventsState) =>
       setHeld((h) => ({
@@ -79,11 +79,13 @@ export function useTaskEvents(taskId: string): TaskEventsState {
         if (isForTask(event, taskId)) setState((s) => ({ ...s, events: merge(s.events, add([event])) }));
       },
       onStatus: (status) => {
+        // An "open" replayed inside subscribe() is a connection the initial load already covers.
+        // Any later one (even the first this hook sees) may follow a gap the socket never delivered.
         // Until the history has loaded, lastSeq may come from a live event alone, so refetch it all.
-        // The first open is the connection the initial load already covers.
-        if (status === "open" && opens++ > 0) void fetchSince(historyLoaded ? lastSeq : undefined);
+        if (status === "open" && !subscribing) void fetchSince(historyLoaded ? lastSeq : undefined);
       },
     });
+    subscribing = false;
     void fetchSince();
 
     return () => {
