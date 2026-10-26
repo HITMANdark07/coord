@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { z } from "zod";
 import { CreateTaskInput, MessageInput, type DaemonEvent, type DiffView, type Task } from "@coord/protocol";
 import type { Store } from "@coord/task-store";
@@ -6,7 +7,8 @@ import { RunnerError } from "../runner/errors";
 import { toTask, type TaskRunner } from "../runner/task-runner";
 import type { Routes } from "./types";
 
-const ListQuery = z.object({ repoId: z.string().optional(), all: z.string().optional() });
+const Flag = z.enum(["1", "true", "0", "false"]).transform((v) => v === "1" || v === "true");
+const ListQuery = z.object({ repoId: z.string().optional(), all: Flag.optional() });
 const EventsQuery = z.object({ sinceSeq: z.coerce.number().int().min(0).optional() });
 /** Hidden from the default list: the task is over (spec §5). */
 const CLOSED = ["cancelled", "cleaned_up"] as const;
@@ -24,7 +26,7 @@ export const taskRoutes =
     api.get("/tasks", async (req): Promise<Task[]> => {
       const { repoId, all } = ListQuery.parse(req.query);
       const tasks = store.listTasks(repoId === undefined ? {} : { repoId }).map(toTask);
-      return all === "1" ? tasks : tasks.filter((t) => !(CLOSED as readonly string[]).includes(t.status));
+      return all ? tasks : tasks.filter((t) => !(CLOSED as readonly string[]).includes(t.status));
     });
 
     api.post("/tasks", async (req, reply) => {
@@ -44,8 +46,18 @@ export const taskRoutes =
 
     api.get<{ Params: { id: string } }>("/tasks/:id/diff", async (req): Promise<DiffView> => {
       const task = known(req.params.id);
-      if (task.worktreePath === null) {
-        throw new RunnerError("conflict", "task has no worktree yet, so there is no diff");
+      // No worktree: not set up yet, or discarded. A directory gone from disk: removed outside coord.
+      const present =
+        task.worktreePath !== null &&
+        (await stat(task.worktreePath).then(
+          (s) => s.isDirectory(),
+          () => false,
+        ));
+      if (task.worktreePath === null || !present) {
+        throw new RunnerError(
+          "conflict",
+          `task is ${task.status} and has no worktree on disk, so there is no diff`,
+        );
       }
       // Read-only: never fetch here (a diff is polled while a human watches).
       const base = task.baseBranch ?? store.getRepo(task.repoId)?.defaultBranch ?? "main";

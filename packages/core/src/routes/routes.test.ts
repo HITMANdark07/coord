@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,8 +14,15 @@ async function daemon(script?: FakeStep[]) {
   open.push(d);
   return d;
 }
+const scratch: string[] = [];
+async function scratchDir(prefix: string) {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  scratch.push(dir);
+  return dir;
+}
 afterEach(async () => {
   for (const d of open.splice(0)) await d.close();
+  for (const dir of scratch.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
 const editA: FakeStep = { edit: { file: "a.txt", content: "from the agent\n" } };
@@ -38,7 +45,7 @@ async function waitFor(check: () => boolean) {
 describe("repo routes", () => {
   it("repo registration rejects a non-git path with invalid_request", async () => {
     const d = await daemon();
-    const dir = await mkdtemp(join(tmpdir(), "coord-notgit-"));
+    const dir = await scratchDir("coord-notgit-");
     const res = await d.call("POST", "/repos", { path: dir });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: "invalid_request" });
@@ -53,17 +60,32 @@ describe("repo routes", () => {
     expect((await d.call("GET", "/repos")).json()).toHaveLength(1);
     expect(Repo.parse((await d.call("GET", `/repos/${repo.id}`)).json()).id).toBe(repo.id);
 
-    const link = join(await mkdtemp(join(tmpdir(), "coord-link-")), "alias");
+    const link = join(await scratchDir("coord-link-"), "alias");
     await symlink(d.repo.path, link);
     // A symlink, a dotted path and a subdirectory all name the same repo.
     const sub = join(d.repo.path, "sub");
-    execFileSync("mkdir", [sub]);
-    for (const path of [link, join(d.repo.path, "."), join(d.repo.path, "..", "repo"), sub]) {
+    await mkdir(sub);
+    // Raw strings on purpose: `join` would normalise them back to the canonical path.
+    const spellings = [link, `${d.repo.path}/./`, `${d.repo.path}/sub/..`, `${d.repo.path}//`, sub];
+    for (const path of spellings) {
       const dup = await d.call("POST", "/repos", { path });
       expect(dup.statusCode, path).toBe(409);
       expect(dup.json()).toMatchObject({ code: "conflict" });
     }
     expect((await d.call("GET", "/repos")).json()).toHaveLength(1);
+  });
+
+  it("answers 503 unavailable, not 400, when git itself can't run", async () => {
+    const d = await daemon();
+    const saved = process.env.PATH;
+    process.env.PATH = "/nonexistent";
+    try {
+      const res = await d.call("POST", "/repos", { path: d.repo.path });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ code: "unavailable" });
+    } finally {
+      process.env.PATH = saved;
+    }
   });
 
   it("answers 404 for an unknown repo and 400 for a relative path", async () => {
@@ -146,6 +168,10 @@ describe("task routes", () => {
     ];
     await d.runner.idle();
     bodies.push((await d.call("POST", `/tasks/${id}/discard`)).json());
+    // Event payloads carry tasks too (task.updated).
+    const events = (await d.call("GET", `/tasks/${id}/events`)).json() as DaemonEvent[];
+    expect(events.some((e) => e.payload.kind === "task.updated")).toBe(true);
+    bodies.push(events);
     const text = JSON.stringify(bodies);
     for (const field of ["portBase", "pendingMessage", "discardedAt"]) expect(text).not.toContain(field);
     // The record itself does have them, so the check above is meaningful.
@@ -191,6 +217,24 @@ describe("task routes", () => {
     }
     const { id } = (await d.call("POST", "/tasks", { repoId: repo.id, prompt: "x" })).json() as Task;
     expect((await d.call("POST", `/tasks/${id}/messages`, { text: "" })).statusCode).toBe(400);
+  });
+
+  it("validates query parameters", async () => {
+    const d = await daemon();
+    for (const url of [
+      "/permissions?taskId=a&taskId=b",
+      "/tasks?all=yes",
+      "/tasks?all=",
+      "/tasks?all=1&all=0",
+      "/tasks?repoId=a&repoId=b",
+    ]) {
+      const res = await d.call("GET", url);
+      expect(res.statusCode, url).toBe(400);
+      expect(res.json()).toMatchObject({ code: "invalid_request" });
+    }
+    for (const all of ["1", "true", "0", "false"]) {
+      expect((await d.call("GET", `/tasks?all=${all}`)).statusCode, all).toBe(200);
+    }
   });
 
   it("does not leak internals on an unexpected failure", async () => {
@@ -253,6 +297,17 @@ describe("diff route", () => {
     const res = await d.call("GET", `/tasks/${id}/diff`);
     expect(res.statusCode).toBe(200);
     expect(DiffView.parse(res.json()).files).toHaveLength(1);
+  });
+
+  it("is a 409 conflict when the worktree directory was removed outside coord", async () => {
+    const d = await daemon([editA, done]);
+    const repo = await register(d);
+    const { id } = (await d.call("POST", "/tasks", { repoId: repo.id, prompt: "x" })).json() as Task;
+    await d.runner.idle();
+    await rm(d.store.getTask(id)!.worktreePath!, { recursive: true, force: true });
+    const res = await d.call("GET", `/tasks/${id}/diff`);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ code: "conflict", message: expect.stringContaining("worktree") });
   });
 
   it("is a 409 conflict for a task with no worktree", async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -69,6 +69,22 @@ describe("task store", () => {
   afterEach(async () => {
     store.close();
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")("creates the directory 0700 and the db files 0600", async () => {
+    const fresh = join(dir, "home", "coord.db");
+    const opened = openStore(fresh);
+    // A write makes SQLite create the -wal/-shm files.
+    opened.addRepo(newRepo("/work/other"));
+    const mode = async (p: string) => (await stat(p)).mode & 0o777;
+    try {
+      expect(await mode(join(dir, "home"))).toBe(0o700);
+      expect(await mode(fresh)).toBe(0o600);
+      expect(await mode(`${fresh}-wal`)).toBe(0o600);
+      expect(await mode(`${fresh}-shm`)).toBe(0o600);
+    } finally {
+      opened.close();
+    }
   });
 
   it("persists across reopen", () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import type { DaemonEvent, PermissionRequestView, Repo, Task, TaskStatus } from "@coord/protocol";
@@ -317,9 +317,16 @@ export class Store {
 }
 
 export function openStore(file: string): Store {
-  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
+  // The DB holds prompts, transcripts and permission inputs: owner-only (AGENTS.md rule 8).
+  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
+  if (file !== ":memory:") {
+    // The -wal/-shm files are created lazily and take the process umask, so tighten whichever exist.
+    for (const path of [file, `${file}-wal`, `${file}-shm`]) {
+      if (existsSync(path)) chmodSync(path, 0o600);
+    }
+  }
   db.pragma("foreign_keys = ON");
   const current = db.pragma("user_version", { simple: true }) as number;
   for (let v = current; v < MIGRATIONS.length; v++) {
