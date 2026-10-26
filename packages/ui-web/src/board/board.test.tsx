@@ -109,7 +109,7 @@ describe("Board", () => {
         if (fail) throw new Error("daemon down");
         return [mk("a", "running")];
       }
-      return req.path === "/agents" ? [] : [];
+      return [];
     });
     render(
       <ClientProvider client={createClient(transport)}>

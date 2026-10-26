@@ -32,7 +32,8 @@ ipcMain.handle(DAEMON_REQUEST_CHANNEL, async (_event, req: unknown): Promise<Ipc
 ipcMain.handle(PICK_FOLDER_CHANNEL, async (event): Promise<string | null> => {
   const options = { properties: ["openDirectory" as const] };
   const win = BrowserWindow.fromWebContents(event.sender);
-  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (!win) return null; // a dialog with no parent window can hide behind the app
+  const result = await dialog.showOpenDialog(win, options);
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 

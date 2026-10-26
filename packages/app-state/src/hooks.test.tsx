@@ -248,6 +248,16 @@ describe("app-state hooks", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("useAction shows a client validation failure as its first issue's message", async () => {
+    // The client validates input with zod before sending; a PWA user can type a relative path.
+    const client = createClient(fakeTransport(() => ({})));
+    const { result } = renderHook(() => useAction(client.addRepo));
+    await act(async () => {
+      await result.current.run("relative/path");
+    });
+    expect(result.current.error).toBe("must be an absolute path");
+  });
+
   it("useAction is pending while the call runs", async () => {
     let finish: () => void = () => {};
     const { result } = renderHook(() => useAction(() => new Promise<void>((r) => (finish = r))));

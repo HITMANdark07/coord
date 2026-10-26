@@ -1,5 +1,14 @@
 import { useCallback, useState } from "react";
 
+// A zod error's message is the JSON issue list; this package has no zod, so match by shape.
+function readable(err: unknown): string {
+  const issues = err instanceof Error && "issues" in err ? err.issues : undefined;
+  const first: unknown = Array.isArray(issues) ? issues[0] : undefined;
+  if (first && typeof first === "object" && "message" in first && typeof first.message === "string")
+    return first.message;
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** Wraps a daemon call for a button: tracks `pending`, and keeps a failure as `error` instead of throwing. */
 export function useAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>) {
   const [running, setRunning] = useState(0); // a count, so overlapping runs keep `pending` true until all finish
@@ -12,7 +21,7 @@ export function useAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>
         setError(null);
         return result;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(readable(err));
         return undefined;
       } finally {
         setRunning((n) => n - 1);
