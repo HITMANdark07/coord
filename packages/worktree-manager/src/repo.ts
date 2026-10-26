@@ -20,13 +20,14 @@ async function tryGit(args: string[], cwd: string): Promise<string | null> {
 
 export async function readRepoInfo(
   path: string,
-): Promise<{ name: string; defaultBranch: string; remoteUrl: string | null }> {
+): Promise<{ name: string; root: string; defaultBranch: string; remoteUrl: string | null }> {
   const top = (await git(["rev-parse", "--show-toplevel"], { cwd: path })).trim();
   const head = await tryGit(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], path);
   const current = await tryGit(["branch", "--show-current"], path);
   const defaultBranch = head?.replace(/^origin\//, "") || current || "main";
   const remoteUrl = (await tryGit(["remote", "get-url", "origin"], path)) || null;
-  return { name: basename(top), defaultBranch, remoteUrl };
+  // `root` is git's canonical top level, so one repo has one spelling however it was reached.
+  return { name: basename(top), root: top, defaultBranch, remoteUrl };
 }
 
 export async function resolveBaseRef(
@@ -46,6 +47,14 @@ export async function resolveBaseRef(
     }
     throw e;
   }
+}
+
+/** Like `resolveBaseRef` but never touches the network: reads (diff) must not fetch. */
+export async function localBaseRef(repoPath: string, base: string): Promise<string> {
+  const ref = `origin/${base}`;
+  return (await tryGit(["rev-parse", "--verify", "--quiet", `refs/remotes/${ref}`], repoPath)) === null
+    ? base
+    : ref;
 }
 
 export async function readRepoConfig(repoPath: string, ref: string): Promise<RepoConfig> {

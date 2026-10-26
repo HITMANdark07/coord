@@ -52,7 +52,7 @@ describe("worktrees", () => {
   it("reads repo info", async () => {
     const { path, origin } = await makeTempRepo({ withOrigin: true });
     const info = await readRepoInfo(path);
-    expect(info).toEqual({ name: "repo", defaultBranch: "main", remoteUrl: origin });
+    expect(info).toEqual({ name: "repo", root: path, defaultBranch: "main", remoteUrl: origin });
     const bare = await makeTempRepo();
     expect((await readRepoInfo(bare.path)).remoteUrl).toBeNull();
     await expect(readRepoInfo(await tmp())).rejects.toBeInstanceOf(GitError);

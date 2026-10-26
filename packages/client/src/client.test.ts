@@ -92,6 +92,198 @@ describe("createClient", () => {
   });
 });
 
+const repo = {
+  id: "r1",
+  name: "repo",
+  path: "/repo",
+  defaultBranch: "main",
+  remoteUrl: null,
+  bypassAllowed: false,
+  createdAt: "2026-10-26T00:00:00.000Z",
+};
+const diff = {
+  baseRef: "main",
+  files: [{ path: "a", status: "added", additions: 1, deletions: 0 }],
+  patch: "",
+  truncated: false,
+};
+const permission = {
+  id: "p1",
+  taskId: "t1",
+  toolUseId: "tu",
+  tool: "Bash",
+  input: {},
+  canRemember: false,
+  createdAt: "2026-10-26T00:00:00.000Z",
+};
+const event = { seq: 1, at: "2026-10-26T00:00:00.000Z", payload: { kind: "task.updated", task } };
+
+describe("createClient API methods", () => {
+  /** Each case: how the method is called, the request it sends, the reply it validates. */
+  const cases: Array<{
+    name: string;
+    call: (c: ReturnType<typeof createClient>) => Promise<unknown>;
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    reply: unknown;
+    expected?: unknown;
+    bad: unknown;
+  }> = [
+    {
+      name: "listRepos",
+      call: (c) => c.listRepos(),
+      method: "GET",
+      path: "/repos",
+      reply: [repo],
+      bad: [{ id: 1 }],
+    },
+    {
+      name: "addRepo",
+      call: (c) => c.addRepo("/repo"),
+      method: "POST",
+      path: "/repos",
+      body: { path: "/repo" },
+      reply: repo,
+      bad: {},
+    },
+    {
+      name: "listTasks",
+      call: (c) => c.listTasks(),
+      method: "GET",
+      path: "/tasks",
+      reply: [task],
+      bad: [{}],
+    },
+    {
+      name: "listTasks with a filter",
+      call: (c) => c.listTasks({ repoId: "r 1", all: true }),
+      method: "GET",
+      path: "/tasks?repoId=r%201&all=1",
+      reply: [task],
+      bad: [{}],
+    },
+    {
+      name: "getTask",
+      call: (c) => c.getTask("t/1"),
+      method: "GET",
+      path: "/tasks/t%2F1",
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "taskEvents",
+      call: (c) => c.taskEvents("t1"),
+      method: "GET",
+      path: "/tasks/t1/events",
+      reply: [event],
+      bad: [{ seq: "x" }],
+    },
+    {
+      name: "taskEvents since",
+      call: (c) => c.taskEvents("t1", 7),
+      method: "GET",
+      path: "/tasks/t1/events?sinceSeq=7",
+      reply: [event],
+      bad: [{ seq: "x" }],
+    },
+    {
+      name: "taskDiff",
+      call: (c) => c.taskDiff("t1"),
+      method: "GET",
+      path: "/tasks/t1/diff",
+      reply: diff,
+      bad: {},
+    },
+    {
+      name: "sendMessage",
+      call: (c) => c.sendMessage("t1", "hi"),
+      method: "POST",
+      path: "/tasks/t1/messages",
+      body: { text: "hi" },
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "interrupt",
+      call: (c) => c.interrupt("t1"),
+      method: "POST",
+      path: "/tasks/t1/interrupt",
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "cancel",
+      call: (c) => c.cancel("t1"),
+      method: "POST",
+      path: "/tasks/t1/cancel",
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "discard",
+      call: (c) => c.discard("t1"),
+      method: "POST",
+      path: "/tasks/t1/discard",
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "resumeTask",
+      call: (c) => c.resumeTask("t1"),
+      method: "POST",
+      path: "/tasks/t1/resume",
+      reply: task,
+      bad: {},
+    },
+    {
+      name: "listPermissions",
+      call: (c) => c.listPermissions(),
+      method: "GET",
+      path: "/permissions",
+      reply: [permission],
+      bad: [{}],
+    },
+    {
+      name: "listPermissions for a task",
+      call: (c) => c.listPermissions("t1"),
+      method: "GET",
+      path: "/permissions?taskId=t1",
+      reply: [permission],
+      bad: [{}],
+    },
+    {
+      name: "answerPermission",
+      call: (c) => c.answerPermission("p1", { allow: true }),
+      method: "POST",
+      path: "/permissions/p1",
+      body: { allow: true },
+      reply: undefined,
+      bad: undefined,
+    },
+  ];
+
+  it.each(cases)("$name sends $method $path and validates the reply", async (c) => {
+    const transport = fakeTransport(() => c.reply);
+    await c.call(createClient(transport));
+    expect(transport.requests).toEqual([
+      { method: c.method, path: c.path, ...(c.body === undefined ? {} : { body: c.body }) },
+    ]);
+  });
+
+  it.each(cases.filter((c) => c.reply !== undefined))("$name rejects a malformed reply", async (c) => {
+    await expect(c.call(createClient(fakeTransport(() => c.bad)))).rejects.toThrow();
+  });
+
+  it("validates request bodies before sending", async () => {
+    const transport = fakeTransport(() => repo);
+    await expect(createClient(transport).addRepo("relative")).rejects.toThrow(/absolute/);
+    await expect(createClient(transport).sendMessage("t1", "")).rejects.toThrow();
+    await expect(createClient(transport).answerPermission("p1", { allow: "yes" } as never)).rejects.toThrow();
+    expect(transport.requests).toEqual([]);
+  });
+});
+
 describe("httpTransport", () => {
   it("sends the protocol version on every request", async () => {
     let headers: HeadersInit | undefined;

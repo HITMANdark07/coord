@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commitTurn, createWorktree, diffAgainstBase } from "./index";
+import { commitTurn, createWorktree, diffAgainstBase, localBaseRef } from "./index";
 import { makeTempRepo } from "./testing";
 
 describe("diffAgainstBase", () => {
@@ -48,5 +48,15 @@ describe("diffAgainstBase", () => {
     const d = await diffAgainstBase({ cwd: path, baseRef: "main" });
     expect(d.truncated).toBe(true);
     expect(d.patch.length).toBeLessThanOrEqual(1_000_000);
+  });
+});
+
+describe("localBaseRef", () => {
+  it("prefers a local origin/<base> and falls back to <base>, without fetching", async () => {
+    const withOrigin = await makeTempRepo({ withOrigin: true });
+    expect(await localBaseRef(withOrigin.path, "main")).toBe("origin/main");
+    expect(await localBaseRef(withOrigin.path, "nope")).toBe("nope");
+    const plain = await makeTempRepo();
+    expect(await localBaseRef(plain.path, "main")).toBe("main");
   });
 });

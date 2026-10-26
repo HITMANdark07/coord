@@ -114,7 +114,7 @@ interface Live {
 }
 
 /** The task as clients see it: daemon-only bookkeeping stays out of `task.updated`. */
-function toTask(record: TaskRecord): Task {
+export function toTask(record: TaskRecord): Task {
   const { portBase: _portBase, pendingMessage: _pendingMessage, discardedAt: _discardedAt, ...task } = record;
   return task;
 }
