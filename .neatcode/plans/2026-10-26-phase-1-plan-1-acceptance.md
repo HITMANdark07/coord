@@ -77,3 +77,76 @@ This file, committed as `docs: plan 1 acceptance run`. The daemon was stopped by
 | 5    | SIGINT, restart, interrupted, resume | PASS   |
 | 6    | discard keeps branch, repo clean     | PASS   |
 | 7    | log + commit                         | PASS   |
+
+# Run 2 — live messages, interrupt, cancel (post-final-review)
+
+Date: 2026-10-26. Branch `phase-1/core-loop`, HEAD `cd50bda` (includes the final-review fixes). Real Claude Code again; no source file was modified.
+
+## Environment
+
+- Isolated state: `COORD_HOME=<scratchpad>/acceptance2/home`, `COORD_PORT=4647`, exported for every command. `~/.coord` and port 4545 were not used.
+- Scratch repo `acceptance2/scratch` cloned from the local bare `acceptance2/remote.git`; `init` (e5bc7ae) on `main`.
+- Daemon started in the background with `pnpm daemon`, output in `acceptance2/daemon.log`; pid 11583 came from `daemon.lock`. The token was never printed.
+- Task A used `--permission accept_edits` (Bash prompts answered with `coord allow`). Task B used `--permission ask`. Task C used `accept_edits`. Nothing was bypassed.
+
+## A. Live mid-turn message — FAIL
+
+Task `d36aef86`: `coord new "Create files a.ts, b.ts, c.ts each exporting a function ... plus a test.ts using node:test ..." --permission accept_edits`. While `running` (0 turns, no events yet):
+
+```
+coord msg d36a "Also add a d.ts exporting a function d that returns its name, and add it to test.ts."
+sent to d36aef86 (running)
+```
+
+- The agent saw the message inside turn 1: its summary says "and the `d.ts` you added partway through". The worktree has `d.ts`. Only ONE commit was made, `fa8c55d ... (turn 1)`, so the expected `(turn 1)` + `(turn 2)` pair did not appear for this message.
+- After the `done` event (about 21:46:50) the status stayed `running` and the last event was `status: running` (after `done`). At 21:52:50 (6 min with no new events) it was still `running`, 1 turn, $0.2305. Verdict FAIL by the 5-minute rule (see D1).
+- Extra probe: a second `coord msg d36a "Also add an e.ts ..."` while stuck in `running` started a real turn (one Bash permission, allowed), added `e.ts`, and committed `5571d2c ... (turn 2)` on top of `fa8c55d`. Usage went to 2 turns. The task again stuck in `running` after `done` (checked 21:57:22, 4 min with no new events). Task cancelled afterwards.
+
+## B. Interrupt — PASS
+
+Task `8e604488` (`--permission ask`, create one.ts..four.ts one at a time). A Write prompt was answered with `coord allow 3ba2 --always` (4-char prefix). After more `tool: Write` events, `coord interrupt 8e604488` (rc=0). Within 5 s:
+
+```
+status: review
+  done: Interrupted by user
+  status: review
+31fc3d3 Create files one.ts, two.ts, three.ts, four.ts each exportin (turn 1)
+```
+
+Worktree status clean; `one.ts`, `two.ts`, `three.ts` committed (the in-progress edits were kept).
+
+## C. Cancel from running — PASS
+
+Task `8a7266a5` (`accept_edits`, p1.ts..p5.ts). After the first `tool: Write` event, `coord cancel 8a72` (rc=0) -> `cancelled`.
+
+- Worktree directory removed; `git worktree list` no longer shows it.
+- Branch `agent/create-files-p1-ts-p2-ts-p3-ts-p4-ts-p5` kept, with `db098be ... (turn 1)` containing `p1.ts`, `p2.ts`.
+- Re-checked 35 s later: same single commit, tree unchanged (`p1.ts`, `p2.ts`), no new edits, worktree path still absent.
+- Process check: no `claude --stream-json` process had a cwd in a coord worktree (`lsof -d cwd`); the only claude processes left belong to claude-mem's own observer sessions. `ps aux | grep -c create-files-p1` gave 0.
+- Cancelling `d36aef86` (task A, stuck in `running`) also worked: `cancelled`, worktree removed, branch kept with both turn commits.
+
+## D. Cost accumulation — PASS (turn 2 was only reached by the extra probe)
+
+For task A: after turn 1, `coord show` gave `96839 in / 1908 out tokens · $0.2305 · 1 turns`. After turn 2 (the second message): `168486 in / 2884 out tokens · $0.2807 · 2 turns`. Cumulative, not reset. Caveat: the turn 2 here is the `e.ts` probe message, not the original mid-turn message from item A.
+
+## E. Permission prompt display — PASS
+
+- `coord show` now lists `<id>  Bash  node --test test.ts  [--always available]` and `<id>  Write  <full file path>  [--always available]` (the path is truncated with an ellipsis in the long-path case). The event list shows the same text. `coord allow f392` (4-char prefix) worked (`allowed f3923d9c-...`); `coord allow 3ba2 --always` printed `allowed 3ba2768f-... (always)`; earlier D1 and D2 are fixed.
+
+## Defects
+
+- **D1 (runner, high):** a message sent with `coord msg` while the task is `running` leaves the task stuck in `running` after the turn ends. Command: `coord new ... --permission accept_edits`, then `coord msg d36a "Also add a d.ts ..."` while `running`. Observed: the agent absorbed the message in turn 1, committed once, emitted `done`, and then no further event; status stayed `running` for 6+ minutes (no `review`). Expected: one commit per turn (`turn 1` and `turn 2`) and status `review` once all queued messages are handled. The same stuck state repeated after the second message. A further `coord msg` is processed, so the runner is not dead, but nothing moves the task to `review` by itself. Likely cause: the runner counts the live message as a pending turn that the SDK never reports separately; needs investigation (not fixed here).
+- **D2 (runner, medium):** with a live mid-turn message the SDK folds it into the current turn, so the "message runs as its own turn" expectation does not hold (one commit, 1 turn). Needs a product decision together with D1: either accept the folding and finish the turn, or hold the message until `done`.
+- **D3 (minor):** pending Write prompt titles with long paths are truncated by the CLI and so show only the start of the temp path, not the file name. Suggest showing the path relative to the worktree.
+
+## Summary
+
+| Item | Description                                                 | Result |
+| ---- | ----------------------------------------------------------- | ------ |
+| A    | live mid-turn msg: 2 commits, then review                   | FAIL   |
+| B    | interrupt -> review, edits committed                        | PASS   |
+| C    | cancel from running: worktree gone, branch kept, no orphans | PASS   |
+| D    | cost cumulative after turn 2                                | PASS   |
+| E    | permission prompt shows command/path/--always               | PASS   |
+
+Cleanup: the daemon was stopped with SIGINT to pid 11583 and exited within 1 s. Task `8e604488` (review) left its worktree under the temp `COORD_HOME`.
