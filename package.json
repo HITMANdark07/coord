@@ -1,0 +1,55 @@
+{
+  "name": "wto",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "simple-git-hooks",
+    "dev": "WTO_EXTERNAL_DAEMON=1 nx run-many -t dev -p @wto/core @wto/desktop",
+    "build": "nx run-many -t build",
+    "typecheck": "nx run-many -t typecheck",
+    "lint": "nx run-many -t lint",
+    "test": "nx run-many -t test",
+    "check": "nx run-many -t lint typecheck test build && nx format:check --all && pnpm conventions",
+    "format": "nx format:write --all",
+    "format:check": "nx format:check --all",
+    "graph": "nx graph",
+    "daemon": "pnpm --filter @wto/core start",
+    "desktop": "pnpm --filter @wto/desktop dev",
+    "web": "pnpm --filter @wto/web dev",
+    "mobile": "pnpm --filter @wto/mobile start",
+    "relay": "pnpm --filter @wto/relay start",
+    "wto": "pnpm --silent --filter @wto/cli wto",
+    "conventions": "node tools/neatcode-check.mjs"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm exec lint-staged",
+    "pre-push": "pnpm exec nx run-many -t lint typecheck test"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml,css,html}": "prettier --write"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@neatcodeai/cli": "0.1.5",
+    "@neatcodeai/mcp": "0.1.5",
+    "@nx/devkit": "24.0.1",
+    "@nx/eslint-plugin": "24.0.1",
+    "@swc-node/register": "1.12.1",
+    "@swc/core": "1.16.20",
+    "@types/node": "^24",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "lint-staged": "17.6.0",
+    "nx": "24.0.1",
+    "prettier": "3.9.10",
+    "simple-git-hooks": "2.14.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "5.0.5"
+  }
+}

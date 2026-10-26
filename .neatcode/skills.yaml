@@ -1,0 +1,88 @@
+# Active neatcode rules for this repo (committed). Agents call `validate_diff` against these
+# before writing code; `pnpm check` runs `neatcode validate` on the whole graph.
+# The architecture rules mirror AGENTS.md and the Nx boundaries in eslint.config.mjs: ESLint
+# enforces them at lint time, neatcode lets an agent check a plan before writing it.
+# Each boundary has two rules: neatcode records an import as the resolved file path when the
+# importing project declares the dependency, and as the bare package name when it doesn't.
+
+rules:
+  - id: "apps-never-import-the-daemon-by-path"
+    primitive: "import-forbidden"
+    description: "Apps reach the daemon only through @wto/client; they never import @wto/core (AGENTS.md rule 5)."
+    when:
+      source_glob: "apps/**"
+    must:
+      target_glob_forbidden: "packages/core/**"
+    scope: "all"
+  - id: "apps-never-import-the-daemon-by-name"
+    primitive: "import-forbidden"
+    description: "Apps reach the daemon only through @wto/client; they never import @wto/core (AGENTS.md rule 5)."
+    when:
+      source_glob: "apps/**"
+    must:
+      target_glob_forbidden: "@wto/core"
+    scope: "all"
+  - id: "apps-never-import-agent-adapters-by-path"
+    primitive: "import-forbidden"
+    description: "Agent adapters run inside the daemon; apps never import them (type:adapter)."
+    when:
+      source_glob: "apps/**"
+    must:
+      target_glob_forbidden: "packages/adapter-*/**"
+    scope: "all"
+  - id: "apps-never-import-agent-adapters-by-name"
+    primitive: "import-forbidden"
+    description: "Agent adapters run inside the daemon; apps never import them (type:adapter)."
+    when:
+      source_glob: "apps/**"
+    must:
+      target_glob_forbidden: "@wto/adapter-*"
+    scope: "all"
+  - id: "electron-renderer-has-no-node-packages-by-path"
+    primitive: "import-forbidden"
+    description: "The Electron renderer is sandboxed: no Node-only packages such as @wto/local-daemon (AGENTS.md rule 8)."
+    when:
+      source_glob: "apps/desktop/src/renderer/**"
+    must:
+      target_glob_forbidden: "packages/local-daemon/**"
+    scope: "all"
+  - id: "electron-renderer-has-no-node-packages-by-name"
+    primitive: "import-forbidden"
+    description: "The Electron renderer is sandboxed: no Node-only packages such as @wto/local-daemon (AGENTS.md rule 8)."
+    when:
+      source_glob: "apps/desktop/src/renderer/**"
+    must:
+      target_glob_forbidden: "@wto/local-daemon"
+    scope: "all"
+  - id: "mobile-never-imports-ui-web-by-path"
+    primitive: "import-forbidden"
+    description: "@wto/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
+    when:
+      source_glob: "apps/mobile/**"
+    must:
+      target_glob_forbidden: "packages/ui-web/**"
+    scope: "all"
+  - id: "mobile-never-imports-ui-web-by-name"
+    primitive: "import-forbidden"
+    description: "@wto/ui-web renders React DOM; mobile has its own React Native screens (AGENTS.md rule 6)."
+    when:
+      source_glob: "apps/mobile/**"
+    must:
+      target_glob_forbidden: "@wto/ui-web"
+    scope: "all"
+  - id: "ui-never-imports-the-daemon-by-path"
+    primitive: "import-forbidden"
+    description: "Shared UI code reaches the daemon only through @wto/client and @wto/app-state."
+    when:
+      source_glob: "packages/ui-web/**"
+    must:
+      target_glob_forbidden: "packages/core/**"
+    scope: "all"
+  - id: "ui-never-imports-the-daemon-by-name"
+    primitive: "import-forbidden"
+    description: "Shared UI code reaches the daemon only through @wto/client and @wto/app-state."
+    when:
+      source_glob: "packages/ui-web/**"
+    must:
+      target_glob_forbidden: "@wto/core"
+    scope: "all"

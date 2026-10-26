@@ -1,0 +1,8 @@
+import { describe, expect, it } from "vitest";
+import { name } from "./index";
+
+describe("@wto/<%= name %>", () => {
+  it("exports its public API", () => {
+    expect(name).toBe("<%= name %>");
+  });
+});

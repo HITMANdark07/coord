@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+# Packages allowed to run install scripts (pnpm 10 blocks them by default).
+# Electron is not listed: since v45 it downloads its binary on first run.
+# Native modules must be listed or pnpm silently skips their build (e.g. better-sqlite3, Phase 1).
+onlyBuiltDependencies:
+  - "@swc/core"
+  - better-sqlite3
+  - esbuild
+  - nx
+  - simple-git-hooks
+
+# Reviewed and not needed: jest-expo works without these packages' optional native builds.
+ignoredBuiltDependencies:
+  - "@parcel/watcher"
+  - unrs-resolver

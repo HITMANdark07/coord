@@ -1,0 +1,15 @@
+# Candidates the user explicitly rejected. `neatcode skills derive`
+# reads this list and skips rejected ids on every run, so stale candidates
+# don't keep coming back. Generated and maintained by the CLI — safe to
+# hand-edit.
+
+rejected:
+  - id: "folder-naming:apps/web/src->[-token.test.ts|-token.ts]"
+    rejected_at: "2026-10-26T10:26:04.219Z"
+    reason: "Sample too small (2-3 files): incidental file names, not a convention"
+  - id: "folder-naming:packages/local-daemon/src->.test.ts"
+    rejected_at: "2026-10-26T10:26:04.586Z"
+    reason: "Sample too small (2-3 files): incidental file names, not a convention"
+  - id: "folder-naming:web->[-manifest.test.ts|-manifest.ts]"
+    rejected_at: "2026-10-26T10:26:04.954Z"
+    reason: "Sample too small (2-3 files): incidental file names, not a convention"

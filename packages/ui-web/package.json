@@ -1,0 +1,41 @@
+{
+  "name": "@wto/ui-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wto/app-state": "workspace:*",
+    "@wto/design-tokens": "workspace:*",
+    "@wto/protocol": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "~19.3.0",
+    "@types/react-dom": "~19.3.0",
+    "@wto/client": "workspace:*",
+    "@wto/tsconfig": "workspace:*",
+    "jsdom": "30.1.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:ui",
+      "platform:dom"
+    ]
+  }
+}

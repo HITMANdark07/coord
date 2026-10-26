@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "WtoLibrary",
+  "title": "Workspace library",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Package folder and name, e.g. `worktree-manager` creates packages/worktree-manager (@wto/worktree-manager)",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "$default": {
+        "$source": "argv",
+        "index": 0
+      },
+      "x-prompt": "Package name (kebab-case)?"
+    },
+    "type": {
+      "type": "string",
+      "description": "What kind of package; decides what it may import (see AGENTS.md). service = daemon internals.",
+      "enum": ["lib", "state", "ui", "adapter", "service"],
+      "x-prompt": "Type (lib | state | ui | adapter | service)?"
+    },
+    "platform": {
+      "type": "string",
+      "description": "Where the code runs; decides tsconfig, test environment and allowed imports",
+      "enum": ["any", "node", "react", "dom"],
+      "x-prompt": "Platform (any | node | react | dom)?"
+    }
+  },
+  "required": ["name", "type", "platform"]
+}

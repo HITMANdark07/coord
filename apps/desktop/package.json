@@ -1,0 +1,41 @@
+{
+  "name": "@wto/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "~19.3.0",
+    "@types/react-dom": "~19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "@wto/app-state": "workspace:*",
+    "@wto/client": "workspace:*",
+    "@wto/local-daemon": "workspace:*",
+    "@wto/protocol": "workspace:*",
+    "@wto/tsconfig": "workspace:*",
+    "@wto/ui-web": "workspace:*",
+    "electron": "45.0.0",
+    "electron-vite": "6.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "~6.0.3",
+    "vite": "8.3.5"
+  },
+  "nx": {
+    "tags": [
+      "type:app",
+      "platform:electron"
+    ],
+    "implicitDependencies": [
+      "@wto/core"
+    ]
+  }
+}

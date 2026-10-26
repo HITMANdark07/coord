@@ -1,0 +1,30 @@
+{
+  "name": "@wto/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@wto/client": "workspace:*",
+    "@wto/local-daemon": "workspace:*",
+    "tsx": "4.23.15",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@wto/tsconfig": "workspace:*",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:app",
+      "platform:node"
+    ]
+  }
+}

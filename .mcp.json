@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "neatcode": {
+      "command": "pnpm",
+      "args": [
+        "--silent",
+        "exec",
+        "neatcode-mcp"
+      ]
+    }
+  }
+}

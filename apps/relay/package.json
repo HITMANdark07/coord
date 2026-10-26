@@ -1,0 +1,29 @@
+{
+  "name": "@wto/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "tsx": "4.23.15",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/ws": "8.18.2",
+    "@wto/tsconfig": "workspace:*",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:app",
+      "platform:node"
+    ]
+  }
+}

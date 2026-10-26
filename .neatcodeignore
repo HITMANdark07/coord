@@ -1,0 +1,21 @@
+# neatcode ignore file (gitignore syntax)
+# Edit freely. Use !pattern to override a built-in default.
+
+# build artefacts
+dist/
+build/
+coverage/
+.next/
+.turbo/
+
+# generated TypeScript
+*.generated.ts
+*.generated.tsx
+
+# wto build output and caches
+out/
+dev-dist/
+.expo/
+.nx/
+apps/mobile/ios/
+apps/mobile/android/

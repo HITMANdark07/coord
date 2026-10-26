@@ -1,0 +1,36 @@
+{
+  "name": "@wto/workspace-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "generators": "./generators.json",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@nx/devkit": "24.0.1",
+    "@wto/tsconfig": "workspace:*",
+    "nx": "24.0.1",
+    "typescript": "~6.0.3"
+  },
+  "nx": {
+    "tags": [
+      "type:tooling",
+      "platform:node"
+    ],
+    "targets": {
+      "test": {
+        "inputs": [
+          "default",
+          "{workspaceRoot}/apps/*/package.json",
+          "{workspaceRoot}/packages/*/package.json",
+          "{workspaceRoot}/tools/*/package.json",
+          "{workspaceRoot}/.npmrc",
+          "{workspaceRoot}/.nvmrc"
+        ]
+      }
+    }
+  }
+}

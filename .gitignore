@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+.DS_Store
+.env
+.env*.local
+.nx/
+
+# neatcode: regenerated locally (`neatcode sync`); skills.yaml, REPO_OVERVIEW.md, decisions and memory are committed
+.neatcode/graph.db*
+.neatcode/skills.candidates.yaml
+.neatcode/skills.local.yaml
+.neatcode/mcp.log
