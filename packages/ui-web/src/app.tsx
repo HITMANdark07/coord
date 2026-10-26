@@ -6,6 +6,7 @@ import { Board } from "./board/board";
 import { ErrorBoundary } from "./error-boundary";
 import { TaskPanel } from "./panel/task-panel";
 import { AddRepo } from "./repos/add-repo";
+import { NewTaskForm } from "./new-task/new-task-form";
 import { RepoSwitcher, useSelectedRepo } from "./repos/repo-switcher";
 
 export type Notify = (n: { title: string; body: string; onClick: () => void }) => void;
@@ -19,6 +20,7 @@ const c = colors.light;
 /** Root screen shared by the desktop window and the PWA. Each app wraps it in <ClientProvider>. */
 export function App({ surface, platform }: { surface: "desktop" | "web"; platform?: AppPlatform }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const repos = useRepos();
   const list = repos.status === "loading" ? [] : (repos.data ?? []);
   const [selected, select] = useSelectedRepo(list);
@@ -31,11 +33,22 @@ export function App({ surface, platform }: { surface: "desktop" | "web"; platfor
         </header>
         <DaemonBanner />
         {repos.status === "error" && <p role="alert">Could not load repos: {displayText(repos.error)}</p>}
+        {creating && (
+          <NewTaskForm
+            repoId={selected?.id ?? null}
+            surface={surface}
+            onCreated={(id) => {
+              setCreating(false);
+              setOpenTaskId(id);
+            }}
+            onClose={() => setCreating(false)}
+          />
+        )}
         {selected ? (
           <Board
             repoId={selected.id}
             onOpen={setOpenTaskId}
-            onNewTask={() => {}}
+            onNewTask={() => setCreating(true)}
             repoSwitcher={
               <RepoSwitcher
                 repos={list}
