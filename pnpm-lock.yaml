@@ -505,6 +505,22 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  packages/worktree-manager:
+    dependencies:
+      '@coord/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@coord/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   tools/workspace-plugin:
     devDependencies:
       '@coord/tsconfig':
