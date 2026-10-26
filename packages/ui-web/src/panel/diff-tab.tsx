@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useClient, useLiveQuery } from "@coord/app-state";
 import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
 import { displayText, type DaemonEvent, type Task } from "@coord/protocol";
@@ -21,20 +21,25 @@ export function DiffTab({ task }: { task: Task }) {
   );
   const query = useLiveQuery(load, { intervalMs: 15_000, refreshOn });
 
+  const diff = query.status === "loading" ? undefined : query.data;
+  const sections = useMemo(() => new Map(splitPatch(diff?.patch ?? "").map((s) => [s.path, s])), [diff]);
+
   if (query.status === "loading") return <p>Loading…</p>;
-  // A failed poll keeps the last diff on screen; the 409 for a task without a worktree has none.
-  if (query.status === "error" && !query.data) return <p role="alert">{displayText(query.error)}</p>;
-  const diff = query.data;
-  if (!diff) return null;
+  // The 409 for a task without a worktree arrives with no earlier diff to show.
+  if (!diff) return <p role="alert">{displayText(query.status === "error" ? query.error : "")}</p>;
   if (diff.files.length === 0) return <p style={{ color: c.muted }}>No changes yet</p>;
 
-  const sections = new Map(splitPatch(diff.patch).map((s) => [s.path, s]));
   const added = diff.files.reduce((n, f) => n + f.additions, 0);
   const removed = diff.files.reduce((n, f) => n + f.deletions, 0);
   const n = diff.files.length;
 
   return (
     <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+      {query.status === "error" && (
+        <p role="alert" style={{ margin: 0, color: statusColors.failed }}>
+          {`Couldn't refresh: ${displayText(query.error)}`}
+        </p>
+      )}
       <p style={{ margin: 0, color: c.muted }}>
         {`${n} file${n === 1 ? "" : "s"} · +${added} −${removed} · base ${displayText(diff.baseRef)}`}
       </p>

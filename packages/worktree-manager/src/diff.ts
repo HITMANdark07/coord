@@ -94,7 +94,12 @@ async function diffWithIndex(
   let patch: string;
   let truncated = false;
   try {
-    patch = await git(["diff", ...PLAIN, "-M", base, ...paths], { cwd, env, maxBuffer: PATCH_CAP + 1 });
+    // quotepath=false keeps non-ASCII names unquoted in the headers, which clients match to files.
+    patch = await git(["-c", "core.quotepath=false", "diff", ...PLAIN, "-M", base, ...paths], {
+      cwd,
+      env,
+      maxBuffer: PATCH_CAP + 1,
+    });
   } catch (e) {
     const partial = (e as { stdout?: string }).stdout;
     if (partial === undefined || partial.length === 0) throw e;

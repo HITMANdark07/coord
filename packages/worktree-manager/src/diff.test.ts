@@ -62,6 +62,14 @@ describe("diffAgainstBase", () => {
     expect(d.files).toEqual([{ path: "README.md", status: "modified", additions: 1, deletions: 1 }]);
   });
 
+  it("keeps a non-ASCII file name plain in the patch headers", async () => {
+    const { path } = await makeTempRepo();
+    await writeFile(join(path, "café.ts"), "x\n");
+    const d = await diffAgainstBase({ cwd: path, baseRef: "main" });
+    expect(d.files.map((f) => f.path)).toEqual(["café.ts"]);
+    expect(d.patch).toContain("diff --git a/café.ts b/café.ts");
+  });
+
   it("diff excludes the given paths", async () => {
     // Coord copies env files into worktrees; a repo that doesn't ignore them must not show them.
     const { path, env } = await makeTempRepo();

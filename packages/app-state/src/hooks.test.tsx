@@ -255,7 +255,7 @@ describe("app-state hooks", () => {
     await act(async () => {
       await result.current.run("relative/path");
     });
-    expect(result.current.error).toBe("must be an absolute path");
+    expect(result.current.error).toBe("path: must be an absolute path");
   });
 
   it("useAction is pending while the call runs", async () => {

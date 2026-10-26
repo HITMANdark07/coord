@@ -42,4 +42,41 @@ describe("splitPatch", () => {
   it("returns nothing for an empty patch", () => {
     expect(splitPatch("")).toEqual([]);
   });
+
+  it("reads quoted headers with octal escapes and keeps the next file's lines out", () => {
+    const patch = [
+      'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"',
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      'diff --git "a/tab\\there \\"q\\".ts" "b/tab\\there \\"q\\".ts"',
+      "@@ -1 +1 @@",
+      "+c",
+      "diff --git a/plain.ts b/plain.ts",
+      "@@ -1 +1 @@",
+      "+d",
+    ].join("\n");
+    expect(splitPatch(patch)).toEqual([
+      { path: "café.ts", binary: false, lines: ["@@ -1 +1 @@", "-a", "+b"] },
+      { path: 'tab\there "q".ts', binary: false, lines: ["@@ -1 +1 @@", "+c"] },
+      { path: "plain.ts", binary: false, lines: ["@@ -1 +1 @@", "+d"] },
+    ]);
+  });
+
+  it("does not split on a content line that looks like a header", () => {
+    const patch = "diff --git a/x b/x\n@@ -0,0 +1 @@\n+diff --git a/y b/y\n";
+    expect(splitPatch(patch)).toEqual([
+      { path: "x", binary: false, lines: ["@@ -0,0 +1 @@", "+diff --git a/y b/y"] },
+    ]);
+  });
+
+  it("handles CRLF line endings", () => {
+    const patch = "diff --git a/x b/x\r\n@@ -1 +1 @@\r\n-a\r\n+b\r\n";
+    expect(splitPatch(patch)).toEqual([{ path: "x", binary: false, lines: ["@@ -1 +1 @@", "-a", "+b"] }]);
+  });
+
+  it("keeps what it has of a patch cut mid-file", () => {
+    const patch = "diff --git a/x b/x\n@@ -1,3 +1,3 @@\n a\n-b";
+    expect(splitPatch(patch)).toEqual([{ path: "x", binary: false, lines: ["@@ -1,3 +1,3 @@", " a", "-b"] }]);
+  });
 });

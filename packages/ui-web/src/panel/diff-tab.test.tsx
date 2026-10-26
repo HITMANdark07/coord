@@ -106,6 +106,19 @@ describe("DiffTab", () => {
     expect(await screen.findByText(/Task has no worktree on disk/)).toBeTruthy();
   });
 
+  it("says so when a reload fails and the old diff is still shown", async () => {
+    let fail = false;
+    const transport = setup(() => {
+      if (fail) throw new DaemonError(409, "conflict", "Task has no worktree on disk");
+      return view();
+    });
+    await screen.findByText(/base main/);
+    fail = true;
+    act(() => transport.setStatus("open"));
+    expect(await screen.findByText("Couldn't refresh: Task has no worktree on disk")).toBeTruthy();
+    expect(screen.getByText("a.ts")).toBeTruthy();
+  });
+
   it("reloads when the task is updated", async () => {
     let n = 0;
     const transport = setup(() => view({ baseRef: `main${++n}` }));

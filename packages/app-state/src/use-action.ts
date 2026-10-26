@@ -4,8 +4,11 @@ import { useCallback, useState } from "react";
 function readable(err: unknown): string {
   const issues = err instanceof Error && "issues" in err ? err.issues : undefined;
   const first: unknown = Array.isArray(issues) ? issues[0] : undefined;
-  if (first && typeof first === "object" && "message" in first && typeof first.message === "string")
-    return first.message;
+  if (first && typeof first === "object" && "message" in first && typeof first.message === "string") {
+    // A bare "Required" says nothing without the field it belongs to.
+    const path = "path" in first && Array.isArray(first.path) ? first.path.map(String).join(".") : "";
+    return path ? `${path}: ${first.message}` : first.message;
+  }
   return err instanceof Error ? err.message : String(err);
 }
 
