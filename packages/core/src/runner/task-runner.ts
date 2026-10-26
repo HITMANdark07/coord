@@ -138,6 +138,11 @@ function isValidBranchName(name: string, cwd: string): Promise<boolean> {
   });
 }
 
+/** A base branch name git takes as a branch, never as an option (it reaches fetch and show). */
+async function isValidBaseBranch(name: string, cwd: string): Promise<boolean> {
+  return !name.startsWith("-") && (await isValidBranchName(name, cwd));
+}
+
 function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
   return new Promise((resolve) => {
     execFile("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repoPath }, (err) =>
@@ -238,6 +243,9 @@ export class TaskRunner {
       if ((await uniqueBranch(repo.path, input.branch)) !== input.branch) {
         throw new RunnerError("conflict", `branch already exists: ${input.branch}`);
       }
+    }
+    if (input.baseBranch !== undefined && !(await isValidBaseBranch(input.baseBranch, repo.path))) {
+      throw new RunnerError("invalid_request", `invalid base branch name: ${input.baseBranch}`);
     }
 
     const task = store.insertTask({
@@ -524,6 +532,12 @@ export class TaskRunner {
           // Without an explicit base, the config's baseBranch picks it (spec §7). Its setup and
           // checks are then read again from that base, the one the task actually starts from.
           if (task.baseBranch === null && config.baseBranch && config.baseBranch !== baseBranch) {
+            // The config is repo content, as untrusted as a client: check it before git sees it.
+            if (!(await isValidBaseBranch(config.baseBranch, repo.path))) {
+              throw new Error(
+                `.coord/config.json has an invalid baseBranch: ${JSON.stringify(config.baseBranch)}`,
+              );
+            }
             baseBranch = config.baseBranch;
             ({ ref } = await resolveBaseRef(repo.path, baseBranch));
             config = await readRepoConfig(repo.path, ref);

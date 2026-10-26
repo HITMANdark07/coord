@@ -36,7 +36,8 @@ export async function diffAgainstBase(opts: { cwd: string; baseRef: string }): P
 }
 
 async function diffWithIndex(cwd: string, baseRef: string, env: Record<string, string>): Promise<DiffView> {
-  const base = (await git(["merge-base", baseRef, "HEAD"], { cwd, env })).trim();
+  // --end-of-options: the base ref is derived from a client's branch name.
+  const base = (await git(["merge-base", "--end-of-options", baseRef, "HEAD"], { cwd, env })).trim();
   await git(["add", "--intent-to-add", "-A"], { cwd, env });
 
   const nameStatus = (await git(["diff", "--name-status", "-z", "-M", base], { cwd, env })).split("\0");

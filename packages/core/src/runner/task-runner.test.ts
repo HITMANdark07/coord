@@ -435,6 +435,37 @@ describe("TaskRunner", () => {
     expect(await readFile(join(t.worktreePath!, "setup-ran.txt"), "utf8")).toBe("dev\n");
   });
 
+  it("refuses an explicit baseBranch git would not accept as a branch name", async () => {
+    const { store, create } = await setup([done]);
+    for (const baseBranch of ["bad..name", "has space", "-x"]) {
+      await expect(create({ baseBranch })).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect(store.listTasks()).toHaveLength(0);
+  });
+
+  it("fails setup on a config baseBranch that looks like a git option, without running it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "coord-pwned-"));
+    cleanup.push(dir);
+    const pwned = join(dir, "pwned");
+    const { repo, store, runner, create } = await setup([done], {
+      config: { baseBranch: `--upload-pack=touch ${pwned}` },
+    });
+    // With an origin, setup fetches the base: `git fetch origin --upload-pack=<cmd>` would run <cmd>.
+    const origin = join(dir, "origin.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", origin]);
+    git(repo.path, "remote", "add", "origin", origin);
+    git(repo.path, "push", "origin", "main");
+
+    const task = await create();
+    await runner.idle();
+
+    const t = store.getTask(task.id)!;
+    expect(t.status).toBe("failed");
+    expect(t.error).toMatch(/^setup: .*baseBranch.*--upload-pack/);
+    expect(t.worktreePath).toBeNull();
+    expect(existsSync(pwned)).toBe(false);
+  });
+
   it("an explicit baseBranch wins over the config's", async () => {
     const { repo, store, runner, create } = await setup([done], { config: { baseBranch: "dev" } });
     execFileSync("git", ["branch", "dev"], { cwd: repo.path });

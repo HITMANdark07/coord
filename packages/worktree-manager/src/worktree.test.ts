@@ -82,6 +82,17 @@ describe("worktrees", () => {
     expect((await readRepoConfig(path, "main")).checks).toEqual({ t: "true" });
   });
 
+  it("a base that looks like a git option is a ref operand, never an option", async () => {
+    const { path } = await makeTempRepo({ withOrigin: true });
+    const dir = await tmp();
+    const pwned = join(dir, "pwned");
+    await expect(resolveBaseRef(path, `--upload-pack=touch ${pwned}`)).rejects.toBeInstanceOf(GitError);
+    const out = join(dir, "out");
+    await expect(readRepoConfig(path, `--output=${out}`)).rejects.toBeInstanceOf(GitError);
+    expect(existsSync(pwned)).toBe(false);
+    expect(existsSync(out)).toBe(false);
+  });
+
   it("missing config gives defaults; invalid config is a ConfigError", async () => {
     const { path, env } = await makeTempRepo();
     expect((await readRepoConfig(path, "main")).ports.start).toBe(41000);

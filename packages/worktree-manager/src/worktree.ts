@@ -39,9 +39,13 @@ export async function createWorktree(opts: {
 }): Promise<void> {
   await mkdir(dirname(opts.worktreePath), { recursive: true });
   // --no-track: the agent branch must not pull from or push to the base by accident.
-  await git(["worktree", "add", "--no-track", "-b", opts.branch, opts.worktreePath, opts.baseRef], {
-    cwd: opts.repoPath,
-  });
+  // --end-of-options: the base ref is derived from a client's or the config's branch name.
+  await git(
+    ["worktree", "add", "--no-track", "-b", opts.branch, "--end-of-options", opts.worktreePath, opts.baseRef],
+    {
+      cwd: opts.repoPath,
+    },
+  );
 }
 
 export async function copyEnvFiles(

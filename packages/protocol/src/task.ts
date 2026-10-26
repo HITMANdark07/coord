@@ -72,7 +72,12 @@ export const CreateTaskInput = z
       .string()
       .regex(/^agent\/[a-z0-9][a-z0-9._/-]*$/)
       .optional(),
-    baseBranch: z.string().optional(),
+    // A leading "-" would reach git as an option (`--upload-pack=<cmd>` runs a command); the
+    // daemon checks the rest with `git check-ref-format --branch`.
+    baseBranch: z
+      .string()
+      .refine((b) => !b.startsWith("-"), { message: "must not start with -" })
+      .optional(),
     permissionMode: PermissionMode.default("ask"),
   })
   .refine((v) => v.repoId !== undefined || v.repoPath !== undefined, {

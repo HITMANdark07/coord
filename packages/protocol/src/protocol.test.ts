@@ -22,6 +22,12 @@ describe("protocol", () => {
     );
   });
 
+  it("rejects a baseBranch git would read as an option", () => {
+    const input = { repoPath: "/repo", prompt: "x" };
+    expect(() => CreateTaskInput.parse({ ...input, baseBranch: "--upload-pack=touch x" })).toThrow(/-/);
+    expect(CreateTaskInput.parse({ ...input, baseBranch: "release/1.x" }).baseBranch).toBe("release/1.x");
+  });
+
   it("covers the PRD task lifecycle", () => {
     expect(TaskStatus.options).toContain("needs_input");
   });

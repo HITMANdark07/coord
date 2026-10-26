@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,6 +97,29 @@ describe("repo routes", () => {
 });
 
 describe("task routes", () => {
+  it("rejects a baseBranch that looks like a git option, and git never runs it", async () => {
+    const d = await daemon();
+    const repo = await register(d);
+    // With an origin, setup would fetch the base: `git fetch origin --upload-pack=<cmd>` runs <cmd>.
+    const origin = join(await scratchDir("coord-origin-"), "origin.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", origin]);
+    execFileSync("git", ["remote", "add", "origin", origin], { cwd: d.repo.path });
+    execFileSync("git", ["push", "origin", "main"], { cwd: d.repo.path });
+    const pwned = join(await scratchDir("coord-pwned-"), "pwned");
+
+    const res = await d.call("POST", "/tasks", {
+      repoId: repo.id,
+      prompt: "x",
+      baseBranch: `--upload-pack=touch ${pwned}`,
+    });
+    await d.runner.idle();
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "invalid_request" });
+    expect(d.store.listTasks()).toHaveLength(0);
+    expect(existsSync(pwned)).toBe(false);
+  });
+
   it("create → events → permission answer → review over HTTP", async () => {
     const d = await daemon([editA, ask, done]);
     const repo = await register(d);

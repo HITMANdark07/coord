@@ -38,11 +38,16 @@ export async function resolveBaseRef(
   if (!remotes.includes("origin")) return { ref: base, fetched: false };
   const ref = `origin/${base}`;
   try {
-    await git(["fetch", "origin", base], { cwd: repoPath });
+    // --end-of-options: `base` comes from a client or the repo's config; "--upload-pack=<cmd>"
+    // must be a (bad) refspec, never an option that runs a command.
+    await git(["fetch", "--end-of-options", "origin", base], { cwd: repoPath });
     return { ref, fetched: true };
   } catch (e) {
     // Offline: a previously fetched origin/<base> is still a sound starting point.
-    if (e instanceof GitError && (await tryGit(["rev-parse", "--verify", ref], repoPath))) {
+    if (
+      e instanceof GitError &&
+      (await tryGit(["rev-parse", "--verify", "--end-of-options", ref], repoPath))
+    ) {
       return { ref, fetched: false };
     }
     throw e;
@@ -58,10 +63,14 @@ export async function localBaseRef(repoPath: string, base: string): Promise<stri
 }
 
 export async function readRepoConfig(repoPath: string, ref: string): Promise<RepoConfig> {
-  await git(["rev-parse", "--verify", `${ref}^{commit}`], { cwd: repoPath });
+  // --end-of-options throughout: `ref` is derived from a base branch name (`git show --output=`
+  // would write a file).
+  await git(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], { cwd: repoPath });
   const spec = `${ref}:.coord/config.json`;
-  if ((await tryGit(["cat-file", "-e", spec], repoPath)) === null) return RepoConfig.parse({});
-  const raw = await git(["show", spec], { cwd: repoPath });
+  if ((await tryGit(["cat-file", "-e", "--end-of-options", spec], repoPath)) === null) {
+    return RepoConfig.parse({});
+  }
+  const raw = await git(["show", "--end-of-options", spec], { cwd: repoPath });
   let json: unknown;
   try {
     json = JSON.parse(raw);
