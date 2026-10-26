@@ -102,6 +102,15 @@ describe("TaskPanel", () => {
     );
   });
 
+  it("after a successful answer the buttons are gone before any refresh", async () => {
+    setup({ permissions: [prompt("p1")], post: () => undefined });
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+    expect(await screen.findByText("Answered")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(screen.queryByText("Already answered")).toBeNull();
+  });
+
   it("Deny opens an optional reason field and sends the reason", async () => {
     const { posts } = setup({ permissions: [prompt("p1")] });
     fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
@@ -274,6 +283,25 @@ describe("TaskPanel", () => {
     transport.emit(agentEvent(3, { type: "text", text: "three" }) as never);
     await screen.findByText("three");
     expect(log.scrollTop).toBe(200);
+  });
+
+  it("multi-line agent text keeps its line breaks", async () => {
+    setup({ events: [agentEvent(1, { type: "text", text: "line one\nline two" })] });
+    const row = await screen.findByText(
+      (_, el) => el?.children.length === 0 && el.textContent === "line one\nline two",
+    );
+    expect(row.style.whiteSpace).toBe("pre-wrap");
+  });
+
+  it("Esc keeps the panel open while a text field holds text or an IME is composing", async () => {
+    const { onClose } = setup();
+    const box = await screen.findByRole("textbox", { name: "Message the agent" });
+    fireEvent.change(box, { target: { value: "half-written follow-up" } });
+    fireEvent.keyDown(box, { key: "Escape" });
+    fireEvent.keyDown(document, { key: "Escape", isComposing: true });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("Esc closes the panel", async () => {

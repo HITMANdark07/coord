@@ -28,7 +28,11 @@ export function TaskPanel({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape" || e.isComposing) return;
+      // Esc in a field holding text would throw away a half-written follow-up or Deny reason.
+      const t = e.target;
+      if ((t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) && t.value) return;
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -165,7 +169,7 @@ function Header({ task }: { task: Task }) {
 
 const ActionError = ({ error }: { error: string | null }) =>
   error && (
-    <span role="alert" style={{ color: "#dc2626", fontSize: fontSize.sm }}>
+    <span role="alert" style={{ color: statusColors.failed, fontSize: fontSize.sm }}>
       {displayText(error)}
     </span>
   );

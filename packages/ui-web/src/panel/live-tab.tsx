@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { usePermissions, useTaskEvents } from "@coord/app-state";
-import { colors, fontSize, space } from "@coord/design-tokens";
+import { colors, fontSize, space, statusColors } from "@coord/design-tokens";
 import { displayText, type Task } from "@coord/protocol";
 import { agentLabel } from "../format";
 import { liveRows, type LiveRow } from "./live-rows";
@@ -11,9 +11,9 @@ const c = colors.light;
 const ROW_STYLE: Record<LiveRow["kind"], CSSProperties> = {
   text: {},
   tool: { fontFamily: "ui-monospace, monospace" },
-  result: { fontFamily: "ui-monospace, monospace", color: "#dc2626" },
+  result: { fontFamily: "ui-monospace, monospace", color: statusColors.failed },
   turn: { color: c.muted },
-  error: { color: "#dc2626" },
+  error: { color: statusColors.failed },
   status: { color: c.muted, fontSize: fontSize.sm },
 };
 
@@ -47,7 +47,16 @@ export function LiveTab({ task }: { task: Task }) {
           <p role="alert">Could not load the stream: {displayText(events.error)}</p>
         )}
         {rows.map((row) => (
-          <div key={row.key} style={{ ...ROW_STYLE[row.kind], paddingLeft: row.depth * space.lg }}>
+          <div
+            key={row.key}
+            style={{
+              ...ROW_STYLE[row.kind],
+              paddingLeft: row.depth * space.lg,
+              // Agent text is often several lines (lists, code); long paths must not widen the panel.
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+            }}
+          >
             {row.text}
           </div>
         ))}
