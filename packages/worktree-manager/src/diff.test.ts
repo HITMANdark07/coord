@@ -44,15 +44,14 @@ describe("diffAgainstBase", () => {
 
   it("produces a plain a/ b/ patch whatever the repo's diff config says", async () => {
     const { path } = await makeTempRepo();
-    for (const [key, value] of [
+    const config: Array<[string, string]> = [
       ["diff.noprefix", "true"],
       ["color.diff", "always"],
       ["color.ui", "always"],
       ["diff.external", "echo EXTERNAL"],
       ["diff.upper.textconv", "tr a-z A-Z"],
-    ]) {
-      execFileSync("git", ["config", key, value!], { cwd: path });
-    }
+    ];
+    for (const [key, value] of config) execFileSync("git", ["config", key, value], { cwd: path });
     await writeFile(join(path, ".git/info/attributes"), "README.md diff=upper\n");
     await writeFile(join(path, "README.md"), "changed\n");
     const d = await diffAgainstBase({ cwd: path, baseRef: "main" });
