@@ -1,0 +1,4 @@
+{
+  "extends": "@coord/tsconfig/node.json",
+  "include": ["src", "vitest.config.ts"]
+}
