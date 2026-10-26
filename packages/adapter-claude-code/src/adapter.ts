@@ -67,6 +67,7 @@ export function buildOptions(
   const { permissionMode, env, ...rest } = extra;
   return {
     ...rest,
+    ...(permissionMode === "bypass" ? { allowDangerouslySkipPermissions: true } : {}),
     ...(permissionMode ? { permissionMode: SDK_PERMISSION_MODE[permissionMode] } : {}),
     env: { ...process.env, ...env },
     cwd: ctx.cwd,
@@ -87,6 +88,8 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
 
   function run(firstMessage: string, ctx: RunContext, extra: RunOptions & { resume?: string }): AgentRun {
     const state = { interrupted: false };
+    // Turns sent but not yet finished by a result; an interrupt with none in flight must not mark the next one.
+    let pendingTurns = 1;
     const input = createMessageQueue<SDKUserMessage>();
     input.push(userMessage(firstMessage));
     const abortController = new AbortController();
@@ -102,7 +105,14 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
       ctx.signal.addEventListener("abort", abort, { once: true });
       try {
         session = runQuery({ prompt: input.iterable, options: buildOptions(extra, ctx, abortController) });
-        for await (const msg of session) yield* toAgentEvents(msg, state);
+        for await (const msg of session) {
+          yield* toAgentEvents(msg, state);
+          if (msg.type === "result") {
+            // A result ends the turn, not the session: the next turn starts with a clean flag.
+            state.interrupted = false;
+            pendingTurns = Math.max(0, pendingTurns - 1);
+          }
+        }
       } catch (err) {
         // An abort or a crashed Claude Code process ends the run with an event, not an exception.
         const reason = ctx.signal.aborted ? "run aborted" : err instanceof Error ? err.message : String(err);
@@ -115,9 +125,13 @@ export function createClaudeCodeAdapter(deps: { query?: QueryFn } = {}): AgentAd
 
     return {
       events: events(),
-      send: (message) => input.push(userMessage(message)),
+      send: (message) => {
+        const accepted = input.push(userMessage(message));
+        if (accepted) pendingTurns += 1;
+        return accepted;
+      },
       interrupt: async () => {
-        state.interrupted = true;
+        if (pendingTurns > 0) state.interrupted = true;
         await session?.interrupt();
       },
       end: () => input.end(),

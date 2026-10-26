@@ -386,4 +386,45 @@ describe("Task 2 adapter upgrades", () => {
     } as unknown as SDKMessage);
     expect(events).toEqual([{ type: "text", text: "sub", parentToolUseId: "tu-1" }]);
   });
+
+  it("an interrupt only affects its own turn", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const failure = {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["boom"],
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    } as unknown as SDKMessage;
+    const twoTurns = (() =>
+      Object.assign(
+        (async function* () {
+          yield fixtures[0];
+          await gate;
+          yield failure; // turn 1, interrupted
+          yield failure; // turn 2, a real failure
+        })(),
+        { interrupt: async () => release() },
+      )) as unknown as typeof query;
+    const run = createClaudeCodeAdapter({ query: twoTurns }).start({ taskId: "t1", prompt: "x" }, ctx());
+    const out: AgentEvent[] = [];
+    for await (const e of run.events) {
+      out.push(e);
+      if (out.length === 1) await run.interrupt();
+      if (e.type === "error") run.end();
+    }
+    const ends = out.filter((e) => e.type === "done" || e.type === "error");
+    expect(ends[0]).toEqual({ type: "done", summary: "Interrupted by user" });
+    expect(ends[1]).toMatchObject({ type: "error" });
+  });
+
+  it("bypass also sets allowDangerouslySkipPermissions, other modes do not", () => {
+    const bypass = buildOptions({ permissionMode: "bypass" }, ctx(), new AbortController());
+    expect(bypass.permissionMode).toBe("bypassPermissions");
+    expect(bypass.allowDangerouslySkipPermissions).toBe(true);
+    const ask = buildOptions({ permissionMode: "ask" }, ctx(), new AbortController());
+    expect(ask).not.toHaveProperty("allowDangerouslySkipPermissions");
+  });
 });
