@@ -5,8 +5,9 @@ import type { Notify } from "../app";
 
 /**
  * Notify when a task enters needs_input, review or failed (PRD: the user shouldn't watch the board).
- * The first event for a task only records its status, so opening the app with tasks already
- * waiting is silent. The map survives reconnects for the same reason.
+ * The daemon publishes task.updated only on creation and transitions and never replays, so every
+ * event is live. Statuses from the list at mount are recorded so opening the app with tasks
+ * already waiting is silent; the map survives reconnects so a repeat never notifies twice.
  */
 export function useTaskNotifications(notify: Notify, onOpen: (taskId: string) => void): void {
   const client = useClient();
@@ -15,13 +16,20 @@ export function useTaskNotifications(notify: Notify, onOpen: (taskId: string) =>
   latest.current = { notify, onOpen };
   useEffect(() => {
     const seen = new Map<string, string>();
+    // Only ids no event has recorded yet: a live event is newer than the list.
+    client.listTasks({ all: true }).then(
+      (tasks) => {
+        for (const t of tasks) if (!seen.has(t.id)) seen.set(t.id, t.status);
+      },
+      () => {}, // a failed list loses only the seed: every pushed event is still a live transition
+    );
     return client.subscribe({
       onEvent: ({ payload }) => {
         if (payload.kind !== "task.updated") return;
         const { id, status, turns, error } = payload.task;
         const before = seen.get(id);
         seen.set(id, status);
-        if (before === undefined || before === status) return;
+        if (before === status) return;
         const title = displayText(payload.task.title);
         const body =
           status === "needs_input"
