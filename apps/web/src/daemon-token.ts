@@ -14,3 +14,8 @@ export function takeDaemonToken(location: Location, history: History, storage: S
   }
   return storage.getItem(STORAGE_KEY) ?? undefined;
 }
+
+/** After a daemon restart the stored token is stale; the next link brings a new one. */
+export function forgetDaemonToken(storage: Storage): void {
+  storage.removeItem(STORAGE_KEY);
+}
