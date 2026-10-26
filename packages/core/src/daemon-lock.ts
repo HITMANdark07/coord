@@ -7,10 +7,14 @@ export interface DaemonLockInfo {
 }
 
 export class DaemonLockedError extends Error {
-  constructor(readonly holder: DaemonLockInfo) {
+  constructor(
+    readonly holder: DaemonLockInfo,
+    readonly file: string,
+  ) {
+    // The pid may have been reused by an unrelated process after a crash: say how to get out.
     super(
       `Another Coord daemon (pid ${holder.pid}, port ${holder.port}) already uses this COORD_HOME. ` +
-        `Stop it, or set a different COORD_HOME.`,
+        `Stop it, or set a different COORD_HOME. If no coord daemon is running, delete ${file}.`,
     );
     this.name = "DaemonLockedError";
   }
@@ -41,7 +45,8 @@ export async function acquireDaemonLock(
   home: string,
   info: DaemonLockInfo,
 ): Promise<{ release(): Promise<void> }> {
-  await mkdir(home, { recursive: true });
+  // Home holds the token file and the database (AGENTS.md rule 8): owner-only from the start.
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const file = join(home, "daemon.lock");
   const body = JSON.stringify({ pid: info.pid, port: info.port });
 
@@ -52,7 +57,7 @@ export async function acquireDaemonLock(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const holder = await readLock(file);
-      if (holder && isAlive(holder.pid)) throw new DaemonLockedError(holder);
+      if (holder && isAlive(holder.pid)) throw new DaemonLockedError(holder, file);
       await rm(file, { force: true });
       if (attempt === 1) throw error;
     }

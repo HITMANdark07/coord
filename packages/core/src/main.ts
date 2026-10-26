@@ -1,3 +1,4 @@
+import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createClaudeCodeAdapter } from "@coord/adapter-claude-code";
 import { coordHome, createToken, daemonPort, removeDaemonInfo, writeDaemonInfo } from "@coord/local-daemon";
@@ -15,6 +16,10 @@ const token = createToken();
 const allowedOrigins =
   process.env.COORD_ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ?? DEFAULT_ALLOWED_ORIGINS;
 const home = coordHome();
+// Home holds the token file, the database and the worktrees (AGENTS.md rule 8). mkdir's mode
+// only applies to a new directory, so chmod repairs a home an older daemon created 0755.
+await mkdir(home, { recursive: true, mode: 0o700 });
+await chmod(home, 0o700);
 // Take the lock before touching the database or the port: a second daemon on this COORD_HOME
 // must exit without opening anything.
 let lock: Awaited<ReturnType<typeof acquireDaemonLock>>;

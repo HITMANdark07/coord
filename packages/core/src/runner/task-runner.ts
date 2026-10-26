@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CreateTaskInput,
@@ -544,6 +544,8 @@ export class TaskRunner {
           }
           const branch = task.branch ?? (await uniqueBranch(repo.path, BRANCH_PREFIX + slugify(task.title)));
           const dir = branch.slice(BRANCH_PREFIX.length).replaceAll("/", "-");
+          // The worktrees hold the user's code and copied env files: owner-only (AGENTS.md rule 8).
+          await mkdir(join(home, "worktrees"), { recursive: true, mode: 0o700 });
           const worktreePath = join(home, "worktrees", `${repo.name}-${repo.id}`, dir);
           await createWorktree({ repoPath: repo.path, worktreePath, branch, baseRef: ref });
           return { config, baseBranch, branch, worktreePath, retry: false };

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -195,6 +195,13 @@ describe("TaskRunner", () => {
     expect(git(repo.path, "branch", "--show-current")).toBe(before.branch);
     expect(await readFile(join(repo.path, "README.md"), "utf8")).toBe("user's unsaved edit\n");
     expect(existsSync(join(repo.path, "a.txt"))).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("creates the worktrees directory owner-only (0700)", async () => {
+    const { home, runner, create } = await setup([done]);
+    await create();
+    await runner.idle();
+    expect((await stat(join(home, "worktrees"))).mode & 0o777).toBe(0o700);
   });
 
   it("two tasks with the same title get different branches", async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,6 +18,20 @@ describe("daemon lock", () => {
     const attempt = acquireDaemonLock(home, { pid: process.pid + 1, port: 4546 });
     await expect(attempt).rejects.toBeInstanceOf(DaemonLockedError);
     await expect(attempt).rejects.toThrow(new RegExp(`${process.pid}.*4545.*COORD_HOME`));
+  });
+
+  it("names the lock file, and says to delete it if no daemon is running", async () => {
+    const file = join(home, "daemon.lock");
+    await writeFile(file, JSON.stringify({ pid: process.pid, port: 4545 }));
+    const err = await acquireDaemonLock(home, { pid: process.pid + 1, port: 4546 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DaemonLockedError);
+    expect((err as Error).message).toContain(`If no coord daemon is running, delete ${file}.`);
+  });
+
+  it.skipIf(process.platform === "win32")("creates a missing home owner-only (0700)", async () => {
+    const fresh = join(home, "fresh");
+    await acquireDaemonLock(fresh, { pid: process.pid, port: 4545 });
+    expect((await stat(fresh)).mode & 0o777).toBe(0o700);
   });
 
   it("stale lock from a dead pid is replaced", async () => {
